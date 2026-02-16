@@ -1,0 +1,480 @@
+{
+  "openapi_like": "3.1.0",
+  "info": {
+    "title": "WoW Server Backend API",
+    "version": "v1"
+  },
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "error_code"],
+        "properties": {
+          "message": { "type": "string" },
+          "error_code": { "type": "string" }
+        }
+      },
+      "HealthCheckResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string", "example": "ok" }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "minLength": 3, "maxLength": 32 },
+          "password": { "type": "string", "minLength": 8, "maxLength": 64 },
+          "email": { "type": ["string", "null"], "format": "email" }
+        }
+      },
+      "RegisterResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["account_id", "username", "email"],
+        "properties": {
+          "account_id": { "type": "integer", "minimum": 1 },
+          "username": { "type": "string" },
+          "email": { "type": ["string", "null"] }
+        }
+      },
+      "SignInRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string" },
+          "password": { "type": "string" }
+        }
+      },
+      "SignInResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "account_id",
+          "username",
+          "email",
+          "gm_level",
+          "access_token",
+          "token_type",
+          "expires_in_seconds",
+          "roles",
+          "permissions",
+          "refresh_token",
+          "refresh_expires_in_seconds"
+        ],
+        "properties": {
+          "account_id": { "type": "integer", "minimum": 1 },
+          "username": { "type": "string" },
+          "email": { "type": ["string", "null"] },
+          "gm_level": { "type": "integer", "minimum": 0 },
+          "access_token": { "type": "string" },
+          "token_type": { "type": "string", "enum": ["Bearer"] },
+          "expires_in_seconds": { "type": "integer", "minimum": 1 },
+          "roles": { "type": "array", "items": { "type": "string" } },
+          "permissions": { "type": "array", "items": { "type": "string" } },
+          "refresh_token": { "type": "string" },
+          "refresh_expires_in_seconds": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "RefreshTokenRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["refresh_token"],
+        "properties": {
+          "refresh_token": { "type": "string", "minLength": 1 }
+        }
+      },
+      "RefreshTokenResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in_seconds",
+          "refresh_token",
+          "refresh_expires_in_seconds"
+        ],
+        "properties": {
+          "access_token": { "type": "string" },
+          "token_type": { "type": "string", "enum": ["Bearer"] },
+          "expires_in_seconds": { "type": "integer", "minimum": 1 },
+          "refresh_token": { "type": "string" },
+          "refresh_expires_in_seconds": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "LogoutRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "refresh_token": { "type": ["string", "null"] }
+        }
+      },
+      "AuthMeResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["account_id", "username", "gm_level", "roles", "permissions"],
+        "properties": {
+          "account_id": { "type": "integer", "minimum": 1 },
+          "username": { "type": "string" },
+          "gm_level": { "type": "integer", "minimum": 0 },
+          "roles": { "type": "array", "items": { "type": "string" } },
+          "permissions": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "CharacterSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "guid",
+          "name",
+          "race",
+          "class",
+          "gender",
+          "level",
+          "map",
+          "zone",
+          "online",
+          "money"
+        ],
+        "properties": {
+          "guid": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string" },
+          "race": { "type": "integer", "minimum": 0 },
+          "class": { "type": "integer", "minimum": 0 },
+          "gender": { "type": "integer", "minimum": 0 },
+          "level": { "type": "integer", "minimum": 1 },
+          "map": { "type": "integer", "minimum": 0 },
+          "zone": { "type": "integer", "minimum": 0 },
+          "online": { "type": "boolean" },
+          "money": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "CharacterListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["account_id", "characters"],
+        "properties": {
+          "account_id": { "type": "integer", "minimum": 1 },
+          "characters": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CharacterSummary" }
+          }
+        }
+      },
+      "CharacterLocationResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "guid",
+          "name",
+          "map",
+          "zone",
+          "position_x",
+          "position_y",
+          "position_z",
+          "orientation",
+          "online"
+        ],
+        "properties": {
+          "guid": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string" },
+          "map": { "type": "integer", "minimum": 0 },
+          "zone": { "type": "integer", "minimum": 0 },
+          "position_x": { "type": "number" },
+          "position_y": { "type": "number" },
+          "position_z": { "type": "number" },
+          "orientation": { "type": "number" },
+          "online": { "type": "boolean" }
+        }
+      },
+      "ItemSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entry", "name", "quality", "item_level", "class", "subclass", "display_id"],
+        "properties": {
+          "entry": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string" },
+          "quality": { "type": "integer", "minimum": 0 },
+          "item_level": { "type": "integer", "minimum": 0 },
+          "class": { "type": "integer", "minimum": 0 },
+          "subclass": { "type": "integer", "minimum": 0 },
+          "display_id": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ItemListResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["limit", "offset", "items"],
+        "properties": {
+          "limit": { "type": "integer", "minimum": 1 },
+          "offset": { "type": "integer", "minimum": 0 },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ItemSummary" }
+          }
+        }
+      },
+      "AdminPlayerSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "username",
+          "email",
+          "joined_unix",
+          "last_login_unix",
+          "last_ip",
+          "locked",
+          "account_online",
+          "gm_level",
+          "character_count"
+        ],
+        "properties": {
+          "id": { "type": "integer", "minimum": 1 },
+          "username": { "type": "string" },
+          "email": { "type": ["string", "null"] },
+          "joined_unix": { "type": ["integer", "null"] },
+          "last_login_unix": { "type": ["integer", "null"] },
+          "last_ip": { "type": ["string", "null"] },
+          "locked": { "type": "boolean" },
+          "account_online": { "type": "boolean" },
+          "gm_level": { "type": "integer", "minimum": 0 },
+          "character_count": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "AdminPlayersResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["limit", "offset", "players"],
+        "properties": {
+          "limit": { "type": "integer", "minimum": 1 },
+          "offset": { "type": "integer", "minimum": 0 },
+          "players": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AdminPlayerSummary" }
+          }
+        }
+      },
+      "AdminAccountLocationsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["account_id", "username", "locations"],
+        "properties": {
+          "account_id": { "type": "integer", "minimum": 1 },
+          "username": { "type": "string" },
+          "locations": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CharacterLocationResponse" }
+          }
+        }
+      },
+      "SetAccountLockRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["locked"],
+        "properties": {
+          "locked": { "type": "boolean" }
+        }
+      },
+      "AccountLockResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["account_id", "locked"],
+        "properties": {
+          "account_id": { "type": "integer", "minimum": 1 },
+          "locked": { "type": "boolean" }
+        }
+      },
+      "OnlinePlayerSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["account_id", "username", "guid", "name", "level", "map", "zone"],
+        "properties": {
+          "account_id": { "type": "integer", "minimum": 1 },
+          "username": { "type": "string" },
+          "guid": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string" },
+          "level": { "type": "integer", "minimum": 1 },
+          "map": { "type": "integer", "minimum": 0 },
+          "zone": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health-check": {
+      "get": {
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthCheckResponse" } } } }
+        }
+      }
+    },
+    "/v1/auth/register": {
+      "post": {
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterRequest" } } } },
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterResponse" } } } },
+          "400": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "409": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/auth/sign-in": {
+      "post": {
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SignInRequest" } } } },
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SignInResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/auth/refresh": {
+      "post": {
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RefreshTokenRequest" } } } },
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RefreshTokenResponse" } } } },
+          "400": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LogoutRequest" } } } },
+        "responses": {
+          "204": { "description": "No Content" },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthMeResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/characters": {
+      "get": {
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CharacterListResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/player/characters": {
+      "get": {
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CharacterListResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/characters/{guid}/location": {
+      "get": {
+        "parameters": [
+          { "name": "guid", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1 } }
+        ],
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CharacterLocationResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "403": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "404": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/items": {
+      "get": {
+        "parameters": [
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
+          { "name": "offset", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } },
+          { "name": "search", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "class", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } }
+        ],
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemListResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/items/{entry}": {
+      "get": {
+        "parameters": [
+          { "name": "entry", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1 } }
+        ],
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ItemSummary" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "404": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/admin/players": {
+      "get": {
+        "parameters": [
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
+          { "name": "offset", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } },
+          { "name": "search", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "online", "in": "query", "required": false, "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminPlayersResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "403": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/admin/players/{account_id}/locations": {
+      "get": {
+        "parameters": [
+          { "name": "account_id", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1 } }
+        ],
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminAccountLocationsResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "403": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "404": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/admin/players/{account_id}/lock": {
+      "patch": {
+        "parameters": [
+          { "name": "account_id", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1 } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SetAccountLockRequest" } } } },
+        "responses": {
+          "200": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountLockResponse" } } } },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "403": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "404": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/v1/admin/online-players": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/OnlinePlayerSummary" }
+                }
+              }
+            }
+          },
+          "401": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "403": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    }
+  }
+}

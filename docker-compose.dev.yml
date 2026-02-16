@@ -1,0 +1,58 @@
+services:
+  app-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${APP_POSTGRES_DB:-wow_app}
+      POSTGRES_USER: ${APP_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:-password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - app_postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-internal
+
+  wow-backend:
+    image: rust:1.86
+    working_dir: /app
+    command: ["cargo", "run"]
+    volumes:
+      - ./:/app
+    ports:
+      - "3000:3000"
+    environment:
+      AZEROTH_CORE_MYSQL_DATABASE_URL: ${AZEROTH_CORE_MYSQL_DATABASE_URL:-mysql://root:password@ac-database:3306}
+      AZEROTH_CORE_AUTH_DB: ${AZEROTH_CORE_AUTH_DB:-acore_auth}
+      AZEROTH_CORE_CHARACTERS_DB: ${AZEROTH_CORE_CHARACTERS_DB:-acore_characters}
+      AZEROTH_CORE_WORLD_DB: ${AZEROTH_CORE_WORLD_DB:-acore_world}
+      APP_POSTGRES_DATABASE_URL: ${APP_POSTGRES_DATABASE_URL:-postgres://postgres:password@app-postgres:5432/wow_app}
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH:-/run/secrets/jwt_private.pem}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/run/secrets/jwt_public.pem}
+      JWT_ISSUER: ${JWT_ISSUER:-wow-backend}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-wow-web}
+      JWT_EXPIRES_MINUTES: ${JWT_EXPIRES_MINUTES:-15}
+      JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS:-30}
+      SRP6_CORE5_MODE: ${SRP6_CORE5_MODE:-false}
+    secrets:
+      - jwt_private
+      - jwt_public
+    depends_on:
+      - app-postgres
+    networks:
+      - app-internal
+      - acore
+
+networks:
+  app-internal:
+  acore:
+    external: true
+    name: ${ACORE_DOCKER_NETWORK:-acore-docker_default}
+
+secrets:
+  jwt_private:
+    file: ${JWT_PRIVATE_FILE:-./.secrets/jwt_private.pem}
+  jwt_public:
+    file: ${JWT_PUBLIC_FILE:-./.secrets/jwt_public.pem}
+
+volumes:
+  app_postgres_data:
