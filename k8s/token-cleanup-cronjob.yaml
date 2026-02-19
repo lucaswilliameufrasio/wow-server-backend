@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: wow-backend-token-cleanup
+  namespace: wow-backend
+spec:
+  schedule: "30 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: cleanup
+              image: postgres:18
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: APP_POSTGRES_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: wow-app-pg-app
+                      key: uri
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  psql "$APP_POSTGRES_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+                  DELETE FROM auth_refresh_tokens WHERE expires_at < NOW();
+                  DELETE FROM auth_revoked_access_tokens WHERE expires_at < NOW();
+                  SQL

@@ -1,0 +1,33 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: wow-app-pg
+  namespace: wow-backend
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:18
+  primaryUpdateStrategy: unsupervised
+
+  storage:
+    size: 10Gi
+
+  superuserSecret:
+    name: wow-app-pg-superuser
+
+  bootstrap:
+    initdb:
+      database: wow_app
+      owner: wow_app_user
+      secret:
+        name: wow-app-pg-app-user
+
+  monitoring:
+    enablePodMonitor: false
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"

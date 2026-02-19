@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wow-backend-migrate
+  namespace: wow-backend
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-postgres
+          image: postgres:18
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: APP_POSTGRES_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: wow-app-pg-app
+                  key: uri
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until pg_isready -d "$APP_POSTGRES_DATABASE_URL"; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+      containers:
+        - name: migrate
+          image: ghcr.io/launchbadge/sqlx-cli:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: wow-app-pg-app
+                  key: uri
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              sqlx migrate run --source /migrations
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: wow-backend-migrations

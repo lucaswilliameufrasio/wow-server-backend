@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wow-backend-config
+  namespace: wow-backend
+data:
+  RUST_LOG: info
+  AZEROTH_CORE_AUTH_DB: acore_auth
+  AZEROTH_CORE_CHARACTERS_DB: acore_characters
+  AZEROTH_CORE_WORLD_DB: acore_world
+  JWT_ISSUER: wow-backend
+  JWT_AUDIENCE: wow-web
+  JWT_EXPIRES_MINUTES: "15"
+  JWT_REFRESH_EXPIRES_DAYS: "30"
+  SRP6_CORE5_MODE: "false"
