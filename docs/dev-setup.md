@@ -70,3 +70,12 @@ Notes:
   - `APP_POSTGRES_DATABASE_URL`
 - Schema is fixed to `public` for migration/runtime consistency.
 - App schema is managed by SQLx migrations (not runtime auto-DDL).
+
+## 4) Optional: instant raid-prep NPC vendors
+
+```bash
+make seed-fast-raid-vendors
+```
+
+Details:
+- `docs/fast-raid-vendors.md`

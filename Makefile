@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help dev test migrate-up migrate-down migration-create setup deps bootstrap seed jwt-keys app-postgres-up app-postgres-wait
+.PHONY: help dev test migrate-up migrate-down migration-create setup deps bootstrap seed seed-fast-raid-vendors jwt-keys app-postgres-up app-postgres-wait preflight-update update-server update-azerothcore update-backend
 
 AZEROTH_CORE_MYSQL_DATABASE_URL ?= mysql://root:password@127.0.0.1:3306
 APP_POSTGRES_DATABASE_URL ?= postgres://postgres:password@127.0.0.1:5432/wow_app
@@ -18,6 +18,11 @@ help:
 	@echo "  make app-postgres-up    - Start app Postgres container"
 	@echo "  make app-postgres-wait  - Wait for app Postgres readiness"
 	@echo "  make setup              - Install tools, bootstrap AzerothCore, migrations, and item seed"
+	@echo "  make seed-fast-raid-vendors - Spawn class/misc raid prep vendors in AzerothCore world DB"
+	@echo "  make preflight-update   - Validate existing-server update prerequisites"
+	@echo "  make update-server      - Update AzerothCore + backend rollout/migrations on existing server"
+	@echo "  make update-azerothcore - Update only AzerothCore (repo + compose + DB updates)"
+	@echo "  make update-backend     - Update only backend (image import + app migrations + rollout)"
 
 dev:
 	cargo run
@@ -74,5 +79,23 @@ app-postgres-wait:
 seed:
 	./scripts/seed-items.sh
 
+seed-fast-raid-vendors:
+	./scripts/seed-fast-raid-vendors.sh
+
 setup: deps jwt-keys bootstrap app-postgres-up app-postgres-wait migrate-up seed
 	@echo "Setup complete."
+
+update-server:
+	./scripts/preflight-update.sh
+	./scripts/update-existing-server.sh
+
+update-azerothcore:
+	UPDATE_AZEROTHCORE=true UPDATE_BACKEND=false ./scripts/preflight-update.sh
+	UPDATE_AZEROTHCORE=true UPDATE_BACKEND=false ./scripts/update-existing-server.sh
+
+update-backend:
+	UPDATE_AZEROTHCORE=false UPDATE_BACKEND=true ./scripts/preflight-update.sh
+	UPDATE_AZEROTHCORE=false UPDATE_BACKEND=true ./scripts/update-existing-server.sh
+
+preflight-update:
+	./scripts/preflight-update.sh

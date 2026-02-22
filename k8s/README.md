@@ -10,6 +10,18 @@ This folder contains a baseline deployment for:
 2. CloudNativePG operator installed
 3. Build backend image locally and import into k3s containerd (no external registry required)
 
+## One-command weekend bootstrap
+
+For fresh VPS setup, use:
+
+```bash
+./scripts/provision-weekend-server.sh
+```
+
+Full env-driven guide:
+- `docs/weekend-quickstart.md`
+- Existing-server update flow: `docs/update-existing-server.md`
+
 ## Local image workflow (recommended for dev)
 
 The Deployment uses:
