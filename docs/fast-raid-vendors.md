@@ -13,6 +13,12 @@ Location:
 make seed-fast-raid-vendors
 ```
 
+Fixed ICC-style preset vendors:
+
+```bash
+make seed-spec-bis-vendors
+```
+
 Equivalent script:
 
 ```bash

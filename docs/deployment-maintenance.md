@@ -179,6 +179,7 @@ make update-server
 
 Detailed guide:
 - `docs/update-existing-server.md`
+- `docs/weekend-go.md`
 
 ## 7) Rollback procedures
 
@@ -237,3 +238,9 @@ Before game weekend:
 - Backend rollout healthy
 - Token cleanup cronjob running
 - Smoke test (`/health-check`, sign-in, character load) passes
+
+One-command execution:
+
+```bash
+make weekend-go
+```

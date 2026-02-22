@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 K8S_DIR="$ROOT_DIR/k8s"
+NOTIFY_SCRIPT="$ROOT_DIR/scripts/notify-webhooks.sh"
 
 NAMESPACE="${NAMESPACE:-wow-backend}"
 WAIT_TIMEOUT="${WAIT_TIMEOUT:-900s}"
@@ -23,6 +24,14 @@ REAPPLY_K8S="${REAPPLY_K8S:-true}"
 
 log() {
   echo "[update-existing-server] $*"
+}
+
+notify() {
+  local status="$1"
+  local message="$2"
+  if [ -x "$NOTIFY_SCRIPT" ]; then
+    "$NOTIFY_SCRIPT" --source "update-existing-server" --status "$status" --message "$message" || true
+  fi
 }
 
 need_cmd() {
@@ -146,6 +155,8 @@ update_backend() {
 }
 
 main() {
+  trap 'code=$?; if [ "$code" -eq 0 ]; then notify success "update completed (namespace=$NAMESPACE image=$BACKEND_IMAGE)"; else notify failure "update failed (exit=$code namespace=$NAMESPACE)"; fi' EXIT
+
   if [ "$UPDATE_AZEROTHCORE" = "true" ]; then
     update_azerothcore
   fi

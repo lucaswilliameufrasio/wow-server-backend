@@ -21,6 +21,7 @@ For fresh VPS setup, use:
 Full env-driven guide:
 - `docs/weekend-quickstart.md`
 - Existing-server update flow: `docs/update-existing-server.md`
+- One-command weekend run: `docs/weekend-go.md`
 
 ## Local image workflow (recommended for dev)
 

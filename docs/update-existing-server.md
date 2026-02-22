@@ -26,6 +26,20 @@ Equivalent script call:
 
 Note: `make update-server`, `make update-azerothcore`, and `make update-backend` already run preflight automatically.
 
+## Safe full flow (recommended)
+
+```bash
+make backup-before-update
+make update-server
+make seed-fast-raid-vendors
+```
+
+Or run all in one command:
+
+```bash
+make weekend-go
+```
+
 ## What it does
 
 1. Updates AzerothCore git repo (`ACORE_REPO_DIR`) to `ACORE_REF`
@@ -63,6 +77,15 @@ export ACORE_REF=master
 export BACKEND_IMAGE=wow-server-backend:dev
 export NAMESPACE=wow-backend
 export WAIT_TIMEOUT=900s
+```
+
+Notification env (optional):
+
+```bash
+export NOTIFY_ENABLED=true
+export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+export TELEGRAM_BOT_TOKEN="123456:ABC..."
+export TELEGRAM_CHAT_ID="-1001234567890"
 ```
 
 Skip backend image build/import (if image already present in k3s):
