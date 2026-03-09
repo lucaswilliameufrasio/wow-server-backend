@@ -7,6 +7,7 @@ This repository includes API services plus operational tooling for fast weekend 
 - New server bootstrap (fresh VPS): `docs/weekend-quickstart.md`
 - One-command weekend run (existing server): `docs/weekend-go.md`
 - Deployment + maintenance runbook: `docs/deployment-maintenance.md`
+- Deployment targets (k3s, Railway, Docker/Portainer): `docs/deployment-targets.md`
 - Existing server updates: `docs/update-existing-server.md`
 - Fast raid vendors: `docs/fast-raid-vendors.md`
 - Fixed spec-BiS vendors: `docs/spec-bis-vendors.md`

@@ -29,7 +29,7 @@ spec:
               done
       containers:
         - name: migrate
-          image: ghcr.io/launchbadge/sqlx-cli:latest
+          image: ghcr.io/launchbadge/sqlx-cli:0.8.6
           imagePullPolicy: IfNotPresent
           env:
             - name: DATABASE_URL

@@ -1,12 +1,26 @@
 SHELL := /bin/bash
 
-.PHONY: help dev test migrate-up migrate-down migration-create setup deps bootstrap seed seed-fast-raid-vendors seed-spec-bis-vendors jwt-keys app-postgres-up app-postgres-wait preflight-update backup-before-update weekend-go update-server update-azerothcore update-backend
+.PHONY: help dev test migrate-up migrate-down migration-create setup deps bootstrap seed seed-fast-raid-vendors seed-spec-bis-vendors jwt-keys app-postgres-up app-postgres-wait preflight-update backup-before-update weekend-go update-server update-azerothcore update-backend docker-build docker-publish docker-ship docker-run docker-compose-prod-up docker-compose-prod-down
 
 AZEROTH_CORE_MYSQL_DATABASE_URL ?= mysql://root:password@127.0.0.1:3306
 APP_POSTGRES_DATABASE_URL ?= postgres://postgres:password@127.0.0.1:5432/wow_app
 APP_POSTGRES_USER ?= postgres
 MIGRATIONS_DIR ?= migrations
 MIGRATION_NAME ?= $(or $(NAME),$(name))
+SQLX_CLI_VERSION ?= 0.8.6
+IMAGE_NAME ?= wow-server-backend
+TAG ?= latest
+TARGET_PLATFORM ?= linux/amd64
+SSH_USER ?= root
+SSH_HOST ?= your-remote-host
+SSH_ALIAS ?=
+ENV ?= .env
+
+ifeq ($(SSH_ALIAS),)
+	SSH_TARGET := $(SSH_USER)@$(SSH_HOST)
+else
+	SSH_TARGET := $(SSH_ALIAS)
+endif
 
 help:
 	@echo "Available targets:"
@@ -26,6 +40,12 @@ help:
 	@echo "  make update-server      - Update AzerothCore + backend rollout/migrations on existing server"
 	@echo "  make update-azerothcore - Update only AzerothCore (repo + compose + DB updates)"
 	@echo "  make update-backend     - Update only backend (image import + app migrations + rollout)"
+	@echo "  make docker-build       - Build production image locally"
+	@echo "  make docker-publish     - Build and push image to registry"
+	@echo "  make docker-ship        - Build image and load to remote Docker via SSH"
+	@echo "  make docker-run         - Run container locally with env file"
+	@echo "  make docker-compose-prod-up   - Start prod compose (app + postgres)"
+	@echo "  make docker-compose-prod-down - Stop prod compose"
 
 dev:
 	cargo run
@@ -54,7 +74,7 @@ deps:
 	@command -v docker >/dev/null 2>&1 || { echo "docker is required"; exit 1; }
 	@command -v openssl >/dev/null 2>&1 || { echo "openssl is required"; exit 1; }
 	@command -v cargo-nextest >/dev/null 2>&1 || cargo install --locked cargo-nextest
-	@command -v sqlx >/dev/null 2>&1 || cargo install --locked sqlx-cli --no-default-features --features rustls,postgres,mysql
+	@command -v sqlx >/dev/null 2>&1 || cargo install --locked sqlx-cli --version $(SQLX_CLI_VERSION) --no-default-features --features rustls,postgres,mysql
 
 jwt-keys:
 	@mkdir -p .secrets
@@ -111,3 +131,35 @@ update-backend:
 
 preflight-update:
 	./scripts/preflight-update.sh
+
+docker-build:
+	@docker buildx inspect container-builder >/dev/null 2>&1 || docker buildx create --name container-builder --driver docker-container --use
+	docker buildx build --builder container-builder --platform $(TARGET_PLATFORM) \
+		-t $(IMAGE_NAME):$(TAG) \
+		-f Dockerfile.production \
+		--load .
+
+docker-publish:
+	@docker buildx inspect container-builder >/dev/null 2>&1 || docker buildx create --name container-builder --driver docker-container --use
+	docker buildx build --builder container-builder --platform $(TARGET_PLATFORM) \
+		-t $(IMAGE_NAME):$(TAG) \
+		-f Dockerfile.production \
+		--push .
+
+docker-ship:
+	@docker buildx inspect container-builder >/dev/null 2>&1 || docker buildx create --name container-builder --driver docker-container --use
+	docker buildx build --builder container-builder --platform $(TARGET_PLATFORM) \
+		-t $(IMAGE_NAME):$(TAG) \
+		-f Dockerfile.production \
+		--output type=docker,dest=- . | ssh $(SSH_TARGET) "docker load"
+
+docker-run:
+	@docker run --rm -p 3000:3000 \
+		$(shell grep -v '^#' $(ENV) | grep -v '^$$' | xargs -I {} echo "-e {}" | tr '\n' ' ') \
+		$(IMAGE_NAME):$(TAG)
+
+docker-compose-prod-up:
+	docker compose -f docker-compose.prod.yml up -d
+
+docker-compose-prod-down:
+	docker compose -f docker-compose.prod.yml down

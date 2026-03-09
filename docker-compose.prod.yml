@@ -13,11 +13,7 @@ services:
       - app-internal
 
   wow-backend:
-    image: rust:1.94
-    working_dir: /app
-    command: ["cargo", "run"]
-    volumes:
-      - ./:/app
+    image: ${IMAGE_NAME:-wow-server-backend}:${TAG:-latest}
     ports:
       - "3000:3000"
     environment:

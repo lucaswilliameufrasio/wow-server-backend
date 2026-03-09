@@ -1,0 +1,6 @@
+target
+.git
+.secrets
+backups
+tmp
+node_modules
