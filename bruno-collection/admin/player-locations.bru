@@ -1,0 +1,15 @@
+meta {
+  name: Admin Player Locations
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/v1/admin/players/{{account_id}}/locations
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}

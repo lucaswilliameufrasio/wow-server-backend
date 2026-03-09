@@ -1,0 +1,15 @@
+meta {
+  name: List Items
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/v1/items?limit=20&offset=0&search=&class=
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{access_token}}
+}
