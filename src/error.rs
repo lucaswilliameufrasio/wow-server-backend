@@ -6,6 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
+use serde_json::Value;
 use sqlx::migrate::MigrateError;
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -37,6 +38,7 @@ pub struct ApiError {
     pub status: StatusCode,
     pub message: &'static str,
     pub error_code: &'static str,
+    pub extra: Option<Value>,
 }
 
 impl ApiError {
@@ -45,7 +47,13 @@ impl ApiError {
             status,
             message,
             error_code,
+            extra: None,
         }
+    }
+
+    pub fn with_extra(mut self, extra: Value) -> Self {
+        self.extra = Some(extra);
+        self
     }
 
     pub fn bad_request(message: &'static str, error_code: &'static str) -> Self {
@@ -80,6 +88,7 @@ impl IntoResponse for ApiError {
             Json(ErrorResponse {
                 message: self.message,
                 error_code: self.error_code,
+                extra: self.extra,
             }),
         )
             .into_response()
@@ -90,4 +99,6 @@ impl IntoResponse for ApiError {
 pub struct ErrorResponse {
     pub message: &'static str,
     pub error_code: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<Value>,
 }

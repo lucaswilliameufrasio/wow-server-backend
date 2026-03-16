@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use axum::{
     body::Body,
     http::{Request, StatusCode, header::AUTHORIZATION},
+    response::IntoResponse,
 };
 use http_body_util::BodyExt;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Validation, decode};
@@ -683,6 +684,26 @@ fn parse_bearer_token_rejects_invalid_headers() {
 
     headers.insert(AUTHORIZATION, "Bearer".parse().expect("header"));
     assert!(extract_bearer_token(&headers).is_err());
+}
+
+#[tokio::test]
+async fn api_error_without_extra_omits_extra_field() {
+    let response = ApiError::bad_request("invalid", "INVALID_INPUT").into_response();
+    let body = body_json(response).await;
+    assert_eq!(body["message"], "invalid");
+    assert_eq!(body["error_code"], "INVALID_INPUT");
+    assert!(body.get("extra").is_none());
+}
+
+#[tokio::test]
+async fn api_error_with_extra_serializes_extra_field() {
+    let response = ApiError::bad_request("invalid", "INVALID_INPUT")
+        .with_extra(json!({ "unknown_value": "abc" }))
+        .into_response();
+    let body = body_json(response).await;
+    assert_eq!(body["message"], "invalid");
+    assert_eq!(body["error_code"], "INVALID_INPUT");
+    assert_eq!(body["extra"]["unknown_value"], "abc");
 }
 
 // ---------------------------------------------------------------------------
@@ -1695,6 +1716,27 @@ async fn logout_revokes_access_token() {
         .expect("response");
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn logout_requires_auth_header() {
+    let app = build_router(default_test_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/auth/logout")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = body_json(response).await;
+    assert_eq!(body["error_code"], "MISSING_AUTH");
 }
 
 // ---------------------------------------------------------------------------

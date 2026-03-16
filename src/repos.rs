@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde_json::json;
 use sqlx::{MySql, MySqlPool, PgPool, QueryBuilder, Row, mysql::MySqlRow};
 use tracing::error;
 use uuid::Uuid;
@@ -16,7 +17,9 @@ pub const APP_PG_SCHEMA: &str = "public";
 
 pub fn map_db_error(context: &'static str, err: sqlx::Error) -> ApiError {
     error!(error = %err, "{context}");
-    ApiError::internal("Database operation failed", "DB_OPERATION_FAILED")
+    ApiError::internal("Database operation failed", "DB_OPERATION_FAILED").with_extra(json!({
+        "context": context
+    }))
 }
 
 pub fn row_get<T>(row: &MySqlRow, column: &str) -> Result<T, ApiError>

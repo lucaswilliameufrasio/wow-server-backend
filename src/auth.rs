@@ -8,6 +8,7 @@ use jsonwebtoken::{Algorithm, Header, encode, errors::ErrorKind};
 use num_bigint::{BigInt, Sign};
 use once_cell::sync::Lazy;
 use rand::RngCore;
+use serde_json::json;
 use sha1::{Digest, Sha1};
 use uuid::Uuid;
 
@@ -127,7 +128,9 @@ pub fn map_jwt_error_to_api(err: jsonwebtoken::errors::Error) -> ApiError {
         | ErrorKind::InvalidAudience
         | ErrorKind::InvalidSignature
         | ErrorKind::ImmatureSignature => ApiError::unauthorized("Invalid token", "INVALID_TOKEN"),
-        _ => ApiError::unauthorized("Authentication failed", "AUTH_FAILED"),
+        _ => ApiError::unauthorized("Authentication failed", "AUTH_FAILED").with_extra(json!({
+            "jwt_error_kind": format!("{:?}", err.kind())
+        })),
     }
 }
 

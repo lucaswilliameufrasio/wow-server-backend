@@ -12,7 +12,11 @@
         "required": ["message", "error_code"],
         "properties": {
           "message": { "type": "string" },
-          "error_code": { "type": "string" }
+          "error_code": { "type": "string" },
+          "extra": {
+            "type": ["object", "null"],
+            "additionalProperties": true
+          }
         }
       },
       "HealthCheckResponse": {
