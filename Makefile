@@ -51,7 +51,27 @@ dev:
 	cargo run
 
 test:
-	cargo nextest run --all-targets
+	@if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --all-targets; \
+	else \
+		cargo test; \
+	fi
+
+coverage:
+	@if command -v cargo-llvm-cov >/dev/null 2>&1; then \
+		cargo llvm-cov --all-targets; \
+	else \
+		echo "cargo-llvm-cov not installed. Install with: cargo install cargo-llvm-cov"; \
+		exit 1; \
+	fi
+
+coverage-html:
+	@if command -v cargo-llvm-cov >/dev/null 2>&1; then \
+		cargo llvm-cov --all-targets --open; \
+	else \
+		echo "cargo-llvm-cov not installed. Install with: cargo install cargo-llvm-cov"; \
+		exit 1; \
+	fi
 
 migrate-up:
 	@[ -d "$(MIGRATIONS_DIR)" ] || mkdir -p "$(MIGRATIONS_DIR)"
