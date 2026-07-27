@@ -142,8 +142,8 @@ impl AccountRepo for LiveAccountRepo {
             .bind(username)
             .bind(salt)
             .bind(verifier)
-            .bind(email)
-            .bind(email)
+            .bind(email.unwrap_or(""))
+            .bind(email.unwrap_or(""))
             .bind(ip)
             .execute(&self.pool)
             .await
