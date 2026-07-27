@@ -151,12 +151,16 @@ fn parse_bool_env(key: &str) -> bool {
 }
 
 async fn run(app: axum::Router) -> AppResult<()> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let port: u16 = env::var("PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3000);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr)
         .await
         .map_err(|source| AppError::Bind { source, addr })?;
 
-    info!(%addr, "listening on {addr}");
+    info!(%addr, %port, "listening on {addr}");
 
     axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())

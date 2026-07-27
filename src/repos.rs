@@ -206,11 +206,11 @@ impl AccountRepo for LiveAccountRepo {
             "SELECT COALESCE(MAX(gmlevel), 0) AS gmlevel FROM {}.account_access WHERE id = ?",
             self.auth_db
         );
-        sqlx::query_scalar::<_, u8>(&sql)
-            .bind(account_id)
+        sqlx::query_scalar::<_, i64>(&sql)
+            .bind(account_id as i32)
             .fetch_one(&self.pool)
             .await
-            .unwrap_or(0)
+            .unwrap_or(0) as u8
     }
 
     async fn find_auth(&self, account_id: u64) -> Result<Option<AuthAccountRow>, ApiError> {
@@ -312,13 +312,13 @@ impl AccountRepo for LiveAccountRepo {
                 id: row_get::<u64>(&row, "id")?,
                 username: row_get::<String>(&row, "username")?,
                 email: row_get_opt::<String>(&row, "email")?,
-                joined_unix: row_get_opt::<u64>(&row, "joined_unix")?,
-                last_login_unix: row_get_opt::<u64>(&row, "last_login_unix")?,
+                joined_unix: row_get_opt::<i64>(&row, "joined_unix")?.map(|v| v as u64),
+                last_login_unix: row_get_opt::<i64>(&row, "last_login_unix")?.map(|v| v as u64),
                 last_ip: row_get_opt::<String>(&row, "last_ip")?,
                 locked: row_get_bool(&row, "locked")?,
                 account_online: row_get_bool(&row, "account_online")?,
-                gm_level: row_get::<u8>(&row, "gm_level")?,
-                character_count: row_get::<u32>(&row, "character_count")?,
+                gm_level: row_get::<i64>(&row, "gm_level")? as u8,
+                character_count: row_get::<i64>(&row, "character_count")? as u32,
             });
         }
 

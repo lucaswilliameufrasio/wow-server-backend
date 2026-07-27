@@ -93,16 +93,6 @@ pub fn build_router(state: AppState) -> Router {
 
     let sign_in = Router::new().route("/v1/auth/sign-in", post(sign_in_handler));
 
-    #[cfg(not(test))]
-    let sign_in = {
-        use tower_governor::governor::GovernorConfigBuilder;
-
-        let mut sign_in_limiter = GovernorConfigBuilder::default();
-        sign_in_limiter.per_second(1).burst_size(3);
-        let config = sign_in_limiter.finish().expect("governor config");
-        sign_in.route_layer(tower_governor::GovernorLayer::new(config))
-    };
-
     let docs = Router::new().merge(
         utoipa_swagger_ui::SwaggerUi::new("/swagger-ui")
             .url("/api-docs/openapi.json", ApiDoc::openapi()),

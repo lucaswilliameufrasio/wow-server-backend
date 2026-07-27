@@ -8,7 +8,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - app_postgres_data:/var/lib/postgresql/data
+      - app_postgres_data:/var/lib/postgresql
     networks:
       - app-internal
 
@@ -19,7 +19,7 @@ services:
     volumes:
       - ./:/app
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     environment:
       AZEROTH_CORE_MYSQL_DATABASE_URL: ${AZEROTH_CORE_MYSQL_DATABASE_URL:-mysql://root:password@ac-database:3306}
       AZEROTH_CORE_AUTH_DB: ${AZEROTH_CORE_AUTH_DB:-acore_auth}
@@ -33,9 +33,12 @@ services:
       JWT_EXPIRES_MINUTES: ${JWT_EXPIRES_MINUTES:-15}
       JWT_REFRESH_EXPIRES_DAYS: ${JWT_REFRESH_EXPIRES_DAYS:-30}
       SRP6_CORE5_MODE: ${SRP6_CORE5_MODE:-false}
+      PORT: ${PORT:-3000}
     secrets:
-      - jwt_private
-      - jwt_public
+      - source: jwt_private
+        target: /run/secrets/jwt_private.pem
+      - source: jwt_public
+        target: /run/secrets/jwt_public.pem
     depends_on:
       - app-postgres
     networks:
