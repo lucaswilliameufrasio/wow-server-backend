@@ -281,6 +281,22 @@ private: .secrets/jwt_private.pem
 public:  .secrets/jwt_public.pem
 ```
 
+### Contas WoW de teste
+
+| Username | Password | GM level | Criada por |
+|---|---|---|---|
+| `NEWTEST` | `Test12345` | 3 (admin) | Setup automático |
+| `PLAYER2` | `Player12345` | 0 (jogador) | Setup automático |
+
+Para criar novas contas: `POST /v1/auth/register`
+
+Para elevar uma conta a GM:
+
+```bash
+docker exec ac-database mysql -uroot -ppassword acore_auth \
+  -e "INSERT INTO account_access (id, gmlevel, RealmID) VALUES (ID_DA_CONTA, 3, -1)"
+```
+
 ## 12) Logs e diagnóstico
 
 ```bash
