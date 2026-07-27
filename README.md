@@ -4,33 +4,25 @@ This repository includes API services plus operational tooling for fast weekend 
 
 ## Quick paths
 
-- New server bootstrap (fresh VPS): [docs/weekend-quickstart.md](docs/weekend-quickstart.md)
-- One-command weekend run (existing server): [docs/weekend-go.md](docs/weekend-go.md)
-- Deployment + maintenance runbook: [docs/deployment-maintenance.md](docs/deployment-maintenance.md)
-- Deployment targets (k3s, Railway, Docker/Portainer): [docs/deployment-targets.md](docs/deployment-targets.md)
-- Existing server updates: [docs/update-existing-server.md](docs/update-existing-server.md)
-- Fast raid vendors: [docs/fast-raid-vendors.md](docs/fast-raid-vendors.md)
-- Fixed spec-BiS vendors: [docs/spec-bis-vendors.md](docs/spec-bis-vendors.md)
+- **[Docker weekend VPS (recomendado)](docs/docker-weekend-vps.md)** — Stack simples com Docker Compose, sem Kubernetes
+- [Dev setup (local)](docs/dev-setup.md) — Para desenvolvimento na máquina local
+- [Deployment targets (k3s, Railway, Docker/Portainer)](docs/deployment-targets.md)
+- [Existing server updates](docs/update-existing-server.md)
+- [Fast raid vendors](docs/fast-raid-vendors.md)
+- [Fixed spec-BiS vendors](docs/spec-bis-vendors.md)
 
 ## Most common commands
 
 ```bash
-# New server (fresh VPS)
-./scripts/provision-weekend-server.sh
+# New VPS (Docker, sem Kubernetes)
+# Siga o guia: docs/docker-weekend-vps.md
 
-# Existing server, full safe flow
-make weekend-go
+# Dev local
+make setup
+make dev
 
-# Update only
-make update-server
-
-# Backup only
-make backup-before-update
-
-# Seed fast auto-filtered class+misc vendors
+# Seeds
 make seed-fast-raid-vendors
-
-# Seed fixed ICC-style preset vendors
 make seed-spec-bis-vendors
 ```
 

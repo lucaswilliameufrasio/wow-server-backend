@@ -1,4 +1,7 @@
-# Weekend VPS quickstart (target: ~1 hour)
+# Weekend VPS quickstart — k3s + CloudNativePG
+
+> ⚠️ **Atenção:** este guia usa Kubernetes (k3s + CloudNativePG), que é mais complexo.
+> Para uma stack mais simples e rápida, use o guia **[Docker weekend VPS](docker-weekend-vps.md)**.
 
 This guide is for spinning up the full stack on a new VPS with k3s + CloudNativePG + local container image (no external registry).
 
