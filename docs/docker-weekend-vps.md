@@ -88,19 +88,119 @@ Resposta esperada:
 {"message":"ok"}
 ```
 
-## 6) Liberar firewall
+## 6) Mapa de portas
+
+| Porta | Serviço | Público? | Observação |
+|---|---|---|---|
+| `22/tcp` | SSH | Restrito | Só libere para seu IP ou VPN |
+| `3724/tcp` | Authserver WoW | Opcional | Necessário para clientes se conectarem |
+| `8085/tcp` | Worldserver WoW | Opcional | Necessário para clientes se conectarem |
+| `3000/tcp` | Backend API | Opcional | Swagger UI e chamadas REST |
+| `7878/tcp` | SOAP worldserver | **NÃO** | Apenas rede interna |
+| `3306/tcp` | MySQL AzerothCore | **NÃO** | Apenas rede interna |
+| `5432/tcp` | PostgreSQL API | **NÃO** | Apenas rede interna |
+
+Portas Docker que não devem ser expostas: verifique se `docker-compose.prod.yml` ou `docker-compose.dev.yml` publicam `3306`, `5432` ou `7878`. Remova esses `ports:` ou deixe apenas `127.0.0.1:`.
+
+## 7) Liberar acesso à rede
+
+### 7.1 Descobrir interfaces e IPs
 
 ```bash
-ufw allow OpenSSH
-ufw allow 3724/tcp
-ufw allow 8085/tcp
-ufw allow 3000/tcp
+# Ver interfaces de rede disponíveis
+ip link show | grep -E '^[0-9]'
+
+# Descobrir CIDR da LAN (ex.: 192.168.1.0/24)
+ip -4 addr show | grep inet
+
+# Verificar Tailscale (interface: tailscale0)
+tailscale ip --4
+
+# Verificar NetBird (interface: wt0)
+nmctl status 2>/dev/null || echo "NetBird pode nao estar instalado"
+```
+
+### 7.2 Regras UFW base (obrigatórias)
+
+Toda regra deve ter `comment` para identificação.
+
+```bash
+ufw allow OpenSSH comment 'SSH acesso administrativo'
 ufw enable
 ```
 
-NÃO libere `3306` (MySQL) nem `5432` (PostgreSQL) para a internet.
+### 7.3 Acesso público (amigos pela internet)
 
-## 7) Criar contas WoW
+```bash
+ufw allow 3724/tcp comment 'WoW authserver publico'
+ufw allow 8085/tcp comment 'WoW worldserver publico'
+ufw allow 3000/tcp comment 'WoW backend API publico'
+```
+
+A API em `3000` expõe cadastro e login sem autenticação. Se possível, restrinja a LAN/VPN.
+
+### 7.4 Acesso LAN
+
+```bash
+# Substitua 192.168.1.0/24 pelo CIDR da sua rede local
+ufw allow from 192.168.1.0/24 to any port 3724 proto tcp comment 'WoW LAN authserver'
+ufw allow from 192.168.1.0/24 to any port 8085 proto tcp comment 'WoW LAN worldserver'
+ufw allow from 192.168.1.0/24 to any port 3000 proto tcp comment 'WoW LAN backend API'
+```
+
+### 7.5 Acesso via Tailscale
+
+```bash
+ufw allow in on tailscale0 to any port 3724 proto tcp comment 'WoW Tailscale authserver'
+ufw allow in on tailscale0 to any port 8085 proto tcp comment 'WoW Tailscale worldserver'
+ufw allow in on tailscale0 to any port 3000 proto tcp comment 'WoW Tailscale backend API'
+```
+
+### 7.6 Acesso via NetBird
+
+A interface do NetBird costuma ser `wt0`.
+
+```bash
+ufw allow in on wt0 to any port 3724 proto tcp comment 'WoW NetBird authserver'
+ufw allow in on wt0 to any port 8085 proto tcp comment 'WoW NetBird worldserver'
+ufw allow in on wt0 to any port 3000 proto tcp comment 'WoW NetBird backend API'
+```
+
+### 7.7 Resumo por perfil
+
+| Perfil | SSH | Auth 3724 | World 8085 | API 3000 | DBs 3306/5432 |
+|---|---|---|---|---|---|
+| Público irrestrito | ❌ | ✅ | ✅ | ✅ (não recomendado) | ❌ |
+| Só LAN + VPN | ✅ LAN/VPN | ✅ LAN/VPN | ✅ LAN/VPN | ✅ LAN/VPN | ❌ |
+| Só Tailscale | ✅ Tailscale | ✅ Tailscale | ✅ Tailscale | ✅ Tailscale | ❌ |
+| Só NetBird | ✅ NetBird | ✅ NetBird | ✅ NetBird | ✅ NetBird | ❌ |
+
+### 7.8 ⚠️ Ressalva: Docker pode contornar o UFW
+
+O Docker publica portas diretamente nas regras `iptables` do kernel, que podem estar acima das regras do UFW. Para garantir que MySQL, PostgreSQL e SOAP **não** fiquem acessíveis externamente, mesmo que o Compose os publique:
+
+```bash
+# Bloquear acesso externo as portas internas via DOCKER-USER
+iptables -I DOCKER-USER -p tcp --dport 3306 -j DROP
+iptables -I DOCKER-USER -p tcp --dport 5432 -j DROP
+iptables -I DOCKER-USER -p tcp --dport 7878 -j DROP
+```
+
+Para persistir após reboot, instale `iptables-persistent`:
+
+```bash
+apt install -y iptables-persistent
+netfilter-persistent save
+```
+
+Verifique:
+
+```bash
+ufw status verbose
+iptables -L DOCKER-USER -n --line-numbers
+```
+
+## 8) Criar contas WoW
 
 ```bash
 curl -X POST http://127.0.0.1:3000/v1/auth/register \
@@ -117,15 +217,41 @@ docker exec ac-database mysql -uroot -ppassword acore_auth \
 
 O `id` é o `account_id` retornado no registro.
 
-## 8) Configurar clientes WoW
+## 9) Configurar clientes WoW
 
-No arquivo `realmlist.wtf` do WoW 3.3.5a:
+Edite `realmlist.wtf` no diretório de instalação do WoW 3.3.5a.
+
+**Público:**
 
 ```text
 set realmlist IP_PUBLICO_DA_VPS
 ```
 
-## 9) Credenciais padrão
+**LAN:**
+
+```text
+set realmlist 192.168.1.100   # IP da VPS na rede local
+```
+
+**Tailscale:**
+
+```text
+set realmlist 100.x.x.x        # IP Tailscale da VPS
+```
+
+**NetBird:**
+
+```text
+set realmlist 10.x.x.x         # IP NetBird da VPS
+```
+
+**Mesma máquina (localhost):**
+
+```text
+set realmlist 127.0.0.1
+```
+
+## 11) Credenciais padrão
 
 ### MySQL AzerothCore
 
@@ -155,7 +281,7 @@ private: .secrets/jwt_private.pem
 public:  .secrets/jwt_public.pem
 ```
 
-## 10) Logs e diagnóstico
+## 12) Logs e diagnóstico
 
 ```bash
 # Logs da API
@@ -175,7 +301,7 @@ curl -s http://127.0.0.1:3000/v1/auth/me
 curl -s 'http://127.0.0.1:3000/v1/items?search=sword'
 ```
 
-## 11) Swagger UI
+## 13) Swagger UI
 
 Abra no navegador:
 
