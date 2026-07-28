@@ -1,6 +1,7 @@
 mod auth;
 mod error;
 mod handlers;
+mod metrics;
 mod middleware;
 mod models;
 mod repos;

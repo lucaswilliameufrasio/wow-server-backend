@@ -11,6 +11,7 @@ use utoipa::{
 
 use crate::auth::*;
 use crate::error::*;
+use crate::metrics;
 use crate::middleware::*;
 use crate::models::*;
 use crate::repos::*;
@@ -89,7 +90,8 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/admin/online-players",
             get(admin_online_players_handler),
         )
-        .route("/debug/diagnostics", get(diagnostics_handler));
+        .route("/debug/diagnostics", get(diagnostics_handler))
+        .route("/metrics", get(metrics::metrics_handler));
 
     let sign_in = Router::new().route("/v1/auth/sign-in", post(sign_in_handler));
 
@@ -114,6 +116,7 @@ pub fn build_router(state: AppState) -> Router {
     tag = "health"
 )]
 async fn health_check_handler() -> Json<HealthCheckResponse> {
+    metrics::HEALTH_CHECKS.inc();
     Json(HealthCheckResponse { message: "ok" })
 }
 

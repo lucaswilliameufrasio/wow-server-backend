@@ -38,7 +38,7 @@ fn sha1_bytes(data: &[u8]) -> Vec<u8> {
 }
 
 fn srp6_calculate_verifier(username: &str, password: &str, salt: &[u8], core5: bool) -> Vec<u8> {
-    let up = format!("{}:{}", username.to_uppercase(), password);
+    let up = format!("{}:{}", username.to_uppercase(), password.to_uppercase());
     let h1 = sha1_bytes(up.as_bytes());
 
     let mut h2_input = Vec::new();
