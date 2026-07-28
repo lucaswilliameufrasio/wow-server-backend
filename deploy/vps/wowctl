@@ -1,0 +1,557 @@
+#!/usr/bin/env bash
+# wowctl — WoW Server VPS operations
+# Usage: ./wowctl <command> [options]
+set -euo pipefail
+
+# --- config ----------------------------------------------------------------
+VPS_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$VPS_DIR/../.." && pwd)"
+ACORE_DIR="${WOW_ACORE_DIR:-/opt/azerothcore-wotlk}"
+ACORE_PROJECT="${WOW_ACORE_PROJECT:-azerothcore-wotlk}"
+ACORE_ENV="$ACORE_DIR/.env"
+ENV_FILE="$VPS_DIR/.env"
+COMPOSE_FILE="$VPS_DIR/compose.yml"
+SECRETS_DIR="$REPO_DIR/.secrets"
+BACKUP_DIR="${WOW_BACKUP_DIR:-/srv/wow/backups}"
+BACKUP_RETENTION="${WOW_BACKUP_RETENTION_DAYS:-30}"
+
+# Colors
+R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; B='\033[1;34m'; N='\033[0m'
+
+info()  { echo -e "${B}[wowctl]${N} $*"; }
+ok()    { echo -e "${G}[  ok]${N} $*"; }
+warn()  { echo -e "${Y}[warn]${N} $*"; }
+fail()  { echo -e "${R}[fail]${N} $*"; exit 1; }
+
+require_docker() {
+  command -v docker >/dev/null 2>&1 || fail "docker is required"
+  command -v docker compose >/dev/null 2>&1 || fail "docker compose is required"
+}
+
+load_env() {
+  if [[ -f "$ENV_FILE" ]]; then
+    set -a; source "$ENV_FILE"; set +a
+  fi
+}
+
+ac_compose() {
+  local compose_args=(
+    --project-name "$ACORE_PROJECT"
+    -f "$ACORE_DIR/docker-compose.yml"
+  )
+  if [[ -f "$ACORE_ENV" ]]; then
+    compose_args+=(--env-file "$ACORE_ENV")
+  fi
+  docker compose "${compose_args[@]}" "$@"
+}
+
+be_compose() {
+  local compose_args=(
+    --project-name wow-backend-vps
+    -f "$COMPOSE_FILE"
+  )
+  if [[ -f "$ENV_FILE" ]]; then
+    compose_args+=(--env-file "$ENV_FILE")
+  fi
+  docker compose "${compose_args[@]}" "$@"
+}
+
+# --- commands --------------------------------------------------------------
+
+cmd_install() {
+  require_docker
+
+  # --- AzerothCore clone ---
+  if [[ ! -d "$ACORE_DIR/.git" ]]; then
+    info "Cloning AzerothCore into $ACORE_DIR ..."
+    git clone --depth 1 --branch master \
+      https://github.com/azerothcore/azerothcore-wotlk.git "$ACORE_DIR"
+    ok "AzerothCore cloned"
+  else
+    ok "AzerothCore already at $ACORE_DIR"
+  fi
+
+  # --- .env file ---
+  if [[ ! -f "$ENV_FILE" ]]; then
+    cp "$VPS_DIR/.env.example" "$ENV_FILE"
+    warn ".env created from .env.example — edit $ENV_FILE before continuing"
+    info "Run: nano $ENV_FILE"
+    info "Then re-run: ./wowctl install"
+    exit 0
+  fi
+  load_env
+
+  # --- Validate required vars ---
+  local missing=0
+  for var in WOW_PG_PASSWORD WOW_MYSQL_PASSWORD; do
+    val="${!var:-}"
+    if [[ -z "$val" || "$val" == "CHANGE_ME_GENERATE_32_CHARS" ]]; then
+      fail "$var is not set or still the default — edit $ENV_FILE"
+    fi
+  done
+
+  # --- AzerothCore .env ---
+  info "Creating AzerothCore env file ..."
+  cat > "$ACORE_ENV" <<ACEOF
+COMPOSE_PROJECT_NAME=$ACORE_PROJECT
+DOCKER_DB_ROOT_PASSWORD=$WOW_MYSQL_PASSWORD
+DOCKER_DB_EXTERNAL_PORT=127.0.0.1:3306
+DOCKER_SOAP_EXTERNAL_PORT=127.0.0.1:7878
+DOCKER_WORLD_EXTERNAL_PORT=8085
+DOCKER_AUTH_EXTERNAL_PORT=3724
+ACEOF
+  ok "$ACORE_ENV created"
+
+  # --- JWT keys ---
+  if [[ ! -f "$SECRETS_DIR/jwt_private.pem" ]]; then
+    info "Generating JWT keys ..."
+    mkdir -p "$SECRETS_DIR"
+    openssl genrsa -out "$SECRETS_DIR/jwt_private.pem" 2048
+    openssl rsa -in "$SECRETS_DIR/jwt_private.pem" -pubout -out "$SECRETS_DIR/jwt_public.pem"
+    chmod 600 "$SECRETS_DIR/jwt_private.pem" "$SECRETS_DIR/jwt_public.pem"
+    ok "JWT keys generated"
+  else
+    ok "JWT keys already exist"
+  fi
+
+  # --- worldserver config overrides ---
+  local ws_conf_d="$ACORE_DIR/env/dist/etc/modules"
+  mkdir -p "$ws_conf_d"
+  if [[ ! -f "$ws_conf_d/00-wowctl.conf" ]]; then
+    cat > "$ws_conf_d/00-wowctl.conf" <<'WSCONF'
+# wowctl — performance and quality-of-life overrides
+MinWorldUpdateTime = 50
+WSCONF
+    ok "worldserver config overrides created"
+  else
+    ok "worldserver config overrides already exist"
+  fi
+
+  # --- Create backup directory ---
+  mkdir -p "$BACKUP_DIR"
+
+  echo ""
+  info "Installation complete!"
+  echo ""
+  info "Next steps:"
+  info "  1. ./wowctl up          — start all services"
+  info "  2. ./wowctl set-realm   — configure realm address"
+  info "  3. ./wowctl smoke-test  — verify everything works"
+  echo ""
+}
+
+cmd_up() {
+  require_docker; load_env
+  local ac_only=false be_only=false
+  for arg in "$@"; do
+    [[ "$arg" == "--ac-only" ]] && ac_only=true
+    [[ "$arg" == "--be-only" ]] && be_only=true
+  done
+
+  if ! $be_only; then
+    info "Starting AzerothCore ..."
+    ac_compose up -d ac-database
+    info "Waiting for MySQL ..."
+    for _ in $(seq 1 120); do
+      if ac_compose exec -T ac-database mysqladmin ping -h127.0.0.1 \
+        -uroot -p"$WOW_MYSQL_PASSWORD" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 2
+    done
+    ac_compose up -d ac-db-import ac-client-data-init 2>/dev/null || true
+    info "Waiting for db-import ..."
+    for _ in $(seq 1 180); do
+      if ac_compose ps ac-db-import --format '{{.Status}}' 2>/dev/null \
+        | grep -q 'Exited (0)'; then
+        break
+      fi
+      sleep 3
+    done
+    ac_compose up -d ac-authserver ac-worldserver
+    ok "AzerothCore is running"
+  fi
+
+  if ! $ac_only; then
+    info "Starting backend (PostgreSQL + API) ..."
+    be_compose up -d
+    info "Waiting for API health ..."
+    local port="${WOW_API_PORT:-3000}"
+    for _ in $(seq 1 60); do
+      if curl -sf "http://127.0.0.1:$port/health-check" >/dev/null 2>&1; then
+        ok "API is healthy on port $port"
+        break
+      fi
+      sleep 3
+    done
+    ok "Backend is running"
+  fi
+
+  echo ""
+  info "All services running."
+  info "  WoW auth:  $(ac_compose port ac-authserver 3724 2>/dev/null || echo ':3724')"
+  info "  WoW world: $(ac_compose port ac-worldserver 8085 2>/dev/null || echo ':8085')"
+  info "  API:       127.0.0.1:$port"
+  info "  Logs:      ./wowctl logs"
+}
+
+cmd_down() {
+  require_docker; load_env
+  local ac_only=false be_only=false
+  for arg in "$@"; do
+    [[ "$arg" == "--ac-only" ]] && ac_only=true
+    [[ "$arg" == "--be-only" ]] && be_only=true
+  done
+
+  if ! $ac_only; then
+    info "Stopping backend ..."
+    be_compose down --remove-orphans
+    ok "Backend stopped"
+  fi
+  if ! $be_only; then
+    info "Stopping AzerothCore ..."
+    ac_compose down --remove-orphans
+    ok "AzerothCore stopped"
+  fi
+}
+
+cmd_status() {
+  require_docker
+  echo ""
+  echo "=== AzerothCore ==="
+  ac_compose ps 2>/dev/null || echo "(not running)"
+  echo ""
+  echo "=== Backend ==="
+  be_compose ps 2>/dev/null || echo "(not running)"
+  echo ""
+}
+
+cmd_logs() {
+  require_docker; load_env
+  local service="${1:-}"
+  if [[ -n "$service" ]]; then
+    case "$service" in
+      ac-*) ac_compose logs -f --tail=100 "$service" ;;
+      app-postgres|wow-backend) be_compose logs -f --tail=100 "$service" ;;
+      *) fail "Unknown service: $service (use: ac-authserver, ac-worldserver, ac-database, app-postgres, wow-backend)" ;;
+    esac
+  else
+    # Tail both
+    ac_compose logs -f --tail=50 &
+    be_compose logs -f --tail=50 &
+    wait
+  fi
+}
+
+cmd_set_realm() {
+  require_docker; load_env
+  local address="${1:-}"
+  local local_address="${2:-}"
+
+  if [[ -z "$address" ]]; then
+    read -rp "Realm public IP or domain: " address
+  fi
+  if [[ -z "$local_address" ]]; then
+    read -rp "Realm local IP (leave empty to use public IP): " local_address
+  fi
+  [[ -z "$local_address" ]] && local_address="$address"
+
+  info "Updating realm address to '$address' (local: '$local_address') ..."
+  ac_compose exec -T ac-database mysql -uroot -p"$WOW_MYSQL_PASSWORD" acore_auth \
+    -e "UPDATE realmlist SET address='$address', localAddress='$local_address' WHERE id=1"
+  ok "Realm address updated"
+}
+
+cmd_create_account() {
+  require_docker; load_env
+  local username="${1:-}"
+  local password="${2:-}"
+  local gmlevel="${3:-0}"
+
+  if [[ -z "$username" || -z "$password" ]]; then
+    echo "Usage: ./wowctl create-account <username> <password> [gmlevel]"
+    exit 1
+  fi
+
+  info "Creating account '$username' with GM level $gmlevel ..."
+  local port="${WOW_API_PORT:-3000}"
+  local resp
+  resp=$(curl -sf -X POST "http://127.0.0.1:$port/v1/auth/register" \
+    -H 'content-type: application/json' \
+    -d "{\"username\":\"$username\",\"password\":\"$password\"}" 2>/dev/null) || {
+    fail "Registration failed. Is the API running?"
+  }
+  local account_id
+  account_id=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin).get('account_id', 'unknown'))" 2>/dev/null || echo "unknown")
+  ok "Account '$username' created (id: $account_id)"
+
+  if [[ "$gmlevel" -gt 0 ]]; then
+    info "Granting GM level $gmlevel ..."
+    ac_compose exec -T ac-database mysql -uroot -p"$WOW_MYSQL_PASSWORD" acore_auth \
+      -e "INSERT INTO account_access (id, gmlevel, RealmID) VALUES ($account_id, $gmlevel, -1) ON DUPLICATE KEY UPDATE gmlevel=$gmlevel"
+    ok "GM level set"
+  fi
+}
+
+cmd_smoke_test() {
+  require_docker; load_env
+  local port="${WOW_API_PORT:-3000}"
+  local errors=0
+
+  echo ""
+  info "Running smoke tests ..."
+
+  # 1. AC containers
+  info "1/6 AzerothCore containers ..."
+  for svc in ac-database ac-authserver ac-worldserver; do
+    if ac_compose ps "$svc" --format '{{.Status}}' 2>/dev/null | grep -q 'Up'; then
+      ok "  $svc is Up"
+    else
+      warn "  $svc is NOT running"
+      errors=$((errors + 1))
+    fi
+  done
+
+  # 2. MySQL
+  info "2/6 MySQL connectivity ..."
+  if ac_compose exec -T ac-database mysqladmin ping -h127.0.0.1 \
+    -uroot -p"$WOW_MYSQL_PASSWORD" >/dev/null 2>&1; then
+    ok "  MySQL is accessible"
+  else
+    warn "  MySQL is not accessible"
+    errors=$((errors + 1))
+  fi
+
+  # 3. Realm entry
+  info "3/6 Realm list entry ..."
+  local realm_addr
+  realm_addr=$(ac_compose exec -T ac-database mysql -uroot -p"$WOW_MYSQL_PASSWORD" acore_auth \
+    -N -e "SELECT address FROM realmlist WHERE id=1" 2>/dev/null || echo "")
+  if [[ -n "$realm_addr" && "$realm_addr" != "127.0.0.1" ]]; then
+    ok "  Realm address: $realm_addr"
+  else
+    warn "  Realm address is $realm_addr (run: ./wowctl set-realm)"
+    errors=$((errors + 1))
+  fi
+
+  # 4. Backend containers
+  info "4/6 Backend containers ..."
+  for svc in app-postgres wow-backend; do
+    if be_compose ps "$svc" --format '{{.Status}}' 2>/dev/null | grep -q 'Up'; then
+      ok "  $svc is Up"
+    else
+      warn "  $svc is NOT running"
+      errors=$((errors + 1))
+    fi
+  done
+
+  # 5. API health
+  info "5/6 API health-check ..."
+  local health
+  health=$(curl -sf "http://127.0.0.1:$port/health-check" 2>/dev/null || echo "")
+  if [[ "$health" == *'"message":"ok"'* ]]; then
+    ok "  API /health-check returns ok"
+  else
+    warn "  API health-check failed"
+    errors=$((errors + 1))
+  fi
+
+  # 6. API auth
+  info "6/6 Registration endpoint ..."
+  local reg_resp
+  reg_resp=$(curl -sf -o /dev/null -w '%{http_code}' \
+    -X POST "http://127.0.0.1:$port/v1/auth/register" \
+    -H 'content-type: application/json' \
+    -d '{"username":"__smoke_test__","password":"SmokeTest123"}' 2>/dev/null || echo "fail")
+  if [[ "$reg_resp" == "201" || "$reg_resp" == "409" ]]; then
+    ok "  Registration endpoint responds (HTTP $reg_resp)"
+  else
+    warn "  Registration endpoint returned HTTP $reg_resp"
+    errors=$((errors + 1))
+  fi
+
+  echo ""
+  if [[ "$errors" -eq 0 ]]; then
+    ok "All smoke tests passed!"
+  else
+    warn "$errors test(s) failed — check logs: ./wowctl logs"
+  fi
+}
+
+cmd_backup() {
+  require_docker; load_env
+  local ts
+  ts=$(date +%Y%m%d_%H%M%S)
+  local backup_path="$BACKUP_DIR/$ts"
+  mkdir -p "$backup_path"
+
+  info "Backing up to $backup_path ..."
+
+  # MySQL
+  info "  Dumping MySQL (AzerothCore) ..."
+  ac_compose exec -T ac-database mysqldump -uroot -p"$WOW_MYSQL_PASSWORD" \
+    --all-databases --routines --triggers --single-transaction \
+    > "$backup_path/mysql_all.sql" 2>/dev/null
+  ok "  MySQL dump: $(wc -c < "$backup_path/mysql_all.sql") bytes"
+
+  # PostgreSQL
+  info "  Dumping PostgreSQL (API) ..."
+  be_compose exec -T app-postgres pg_dumpall -U "${WOW_PG_USER:-wow_api}" \
+    > "$backup_path/postgres_all.sql" 2>/dev/null
+  ok "  PostgreSQL dump: $(wc -c < "$backup_path/postgres_all.sql") bytes"
+
+  # Config
+  info "  Copying config and secrets ..."
+  cp "$ENV_FILE" "$backup_path/env.txt"
+  cp "$ACORE_ENV" "$backup_path/azerothcore.env.txt" 2>/dev/null || true
+  cp -r "$SECRETS_DIR" "$backup_path/secrets"
+  cp -r "$ACORE_DIR/env/dist/etc" "$backup_path/azerothcore-config" 2>/dev/null || true
+  ok "  Config and secrets copied"
+
+  # Checksum
+  (cd "$backup_path" && find . -type f -exec sha256sum {} \; > sha256sums.txt)
+  ok "  Checksums written"
+
+  # Compress (background)
+  info "  Compressing ..."
+  (cd "$BACKUP_DIR" && tar czf "$ts.tar.gz" "$ts" && rm -rf "$ts") &
+  ok "  Backup complete: $BACKUP_DIR/$ts.tar.gz (compressing in background)"
+
+  # Retention
+  info "  Pruning backups older than $BACKUP_RETENTION days ..."
+  find "$BACKUP_DIR" -name '*.tar.gz' -type f -mtime "+$BACKUP_RETENTION" -delete 2>/dev/null || true
+}
+
+cmd_restore() {
+  require_docker
+  local archive="${1:-}"
+  if [[ -z "$archive" ]]; then
+    echo "Available backups:"
+    ls -1 "$BACKUP_DIR"/*.tar.gz 2>/dev/null || echo "(none)"
+    echo ""
+    read -rp "Backup archive path: " archive
+  fi
+
+  local restore_dir
+  restore_dir=$(mktemp -d)
+  info "Extracting $archive to $restore_dir ..."
+  tar xzf "$archive" -C "$restore_dir"
+  local dir
+  dir=$(find "$restore_dir" -maxdepth 1 -type d | tail -1)
+
+  if [[ -f "$dir/mysql_all.sql" ]]; then
+    info "Restoring MySQL ... (requires running ac-database)"
+    ac_compose exec -T ac-database mysql -uroot -p"$WOW_MYSQL_PASSWORD" < "$dir/mysql_all.sql" 2>/dev/null
+    ok "MySQL restored"
+  fi
+
+  if [[ -f "$dir/postgres_all.sql" ]]; then
+    info "Restoring PostgreSQL ..."
+    be_compose exec -T app-postgres psql -U "${WOW_PG_USER:-wow_api}" postgres \
+      -c "SELECT 1" >/dev/null 2>&1 || {
+      warn "PostgreSQL not accessible; restore manually:"
+      echo "  cat $dir/postgres_all.sql | docker compose -f $COMPOSE_FILE exec -T app-postgres psql -U ${WOW_PG_USER:-wow_api} postgres"
+    }
+    be_compose exec -T app-postgres psql -U "${WOW_PG_USER:-wow_api}" \
+      < "$dir/postgres_all.sql" 2>/dev/null && ok "PostgreSQL restored" || warn "PostgreSQL restore had issues"
+  fi
+
+  rm -rf "$restore_dir"
+  ok "Restore complete"
+}
+
+cmd_update() {
+  require_docker; load_env
+  local tag="${1:-latest}"
+
+  info "Pulling backend image $WOW_BACKEND_IMAGE:$tag ..."
+  docker pull "$WOW_BACKEND_IMAGE:$tag"
+
+  info "Recreating backend ..."
+  be_compose up -d --force-recreate wow-backend
+
+  info "Waiting for API health ..."
+  local port="${WOW_API_PORT:-3000}"
+  for _ in $(seq 1 60); do
+    if curl -sf "http://127.0.0.1:$port/health-check" >/dev/null 2>&1; then
+      ok "API is healthy"
+      break
+    fi
+    sleep 3
+  done
+
+  info "Backend updated to $tag"
+  info "To rollback: export WOW_BACKEND_TAG=<previous-tag> && ./wowctl update <previous-tag>"
+}
+
+cmd_rollback() {
+  require_docker; load_env
+  local tag="${1:-previous}"
+
+  if [[ "$tag" == "previous" ]]; then
+    warn "Rolling back to 'previous' — make sure this image exists."
+    info "To specify an exact tag: ./wowctl rollback <tag>"
+  fi
+
+  cmd_update "$tag"
+}
+
+cmd_build() {
+  require_docker
+  local tag="${1:-dev}"
+  info "Building backend image locally as $tag ..."
+  docker build -t "$tag" -f "$REPO_DIR/Dockerfile.production" "$REPO_DIR"
+  ok "Image built: $tag"
+  info "Update .env: WOW_BACKEND_IMAGE=$tag and WOW_BACKEND_TAG=latest"
+}
+
+cmd_help() {
+  cat <<HELP
+Usage: ./wowctl <command> [options]
+
+Installation:
+  install              First-time setup (clone AC, create .env and secrets)
+  build [tag]          Build backend image locally
+
+Lifecycle:
+  up [--ac-only|--be-only]  Start all services
+  down [--ac-only|--be-only] Stop all services
+  status                    Show service status
+  logs [service]            Tail logs (service: ac-authserver, ac-worldserver, etc.)
+
+Configuration:
+  set-realm [ip] [localIP]  Update realm address in database
+  create-account <user> <pass> [gmlevel]  Create WoW account via API
+
+Validation:
+  smoke-test            Run smoke tests (6 checks)
+
+Backup & Restore:
+  backup                Backup databases, config, and secrets
+  restore [archive]     Restore from backup archive
+
+Updates:
+  update [tag]          Update backend image and recreate
+  rollback [tag]        Rollback to previous tag
+
+Environment:
+  Edit .env in this directory before running install.
+  WOW_ACORE_DIR          AzerothCore checkout path (default: /opt/azerothcore-wotlk)
+  WOW_BACKUP_DIR         Backup directory (default: /srv/wow/backups)
+  WOW_BACKUP_RETENTION_DAYS  Backup retention (default: 30)
+HELP
+}
+
+# --- main -------------------------------------------------------------------
+cmd="${1:-help}"
+shift 2>/dev/null || true
+
+case "$cmd" in
+  install|up|down|status|logs|set-realm|create-account|smoke-test|backup|restore|update|rollback|build|help)
+    "cmd_$cmd" "$@"
+    ;;
+  *)
+    fail "Unknown command: $cmd"
+    cmd_help
+    ;;
+esac

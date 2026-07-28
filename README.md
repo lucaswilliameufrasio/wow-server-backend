@@ -1,32 +1,53 @@
-# WoW Server Backend Ops Guide
+# WoW Server Backend
 
-This repository includes API services plus operational tooling for fast weekend server runs.
+API Rust + ferramentas de operação para servidor WoW WotLK 3.3.5a com AzerothCore.
 
-## Quick paths
+## Deploy oficial: VPS com Docker Compose
 
-- **[Docker weekend VPS (recomendado)](docs/docker-weekend-vps.md)** — Stack simples com Docker Compose, sem Kubernetes
-- [Dev setup (local)](docs/dev-setup.md) — Para desenvolvimento na máquina local
-- [Deployment targets (k3s, Railway, Docker/Portainer)](docs/deployment-targets.md)
-- [Existing server updates](docs/update-existing-server.md)
-- [Fast raid vendors](docs/fast-raid-vendors.md)
-- [Fixed spec-BiS vendors](docs/spec-bis-vendors.md)
-
-## Most common commands
+Uma VPS Linux com Docker Compose é o destino oficial e mais simples.
 
 ```bash
-# New VPS (Docker, sem Kubernetes)
-# Siga o guia: docs/docker-weekend-vps.md
-
-# Dev local
-make setup
-make dev
-
-# Seeds
-make seed-fast-raid-vendors
-make seed-spec-bis-vendors
+git clone <URL> /opt/wow-backend
+git clone --depth 1 https://github.com/azerothcore/azerothcore-wotlk.git /opt/azerothcore-wotlk
+cd /opt/wow-backend/deploy/vps
+cp .env.example .env
+# edite as senhas no .env
+./wowctl install
+./wowctl up
+./wowctl set-realm <IP_PUBLICO>
+./wowctl smoke-test
 ```
 
-## Optional notifications (Discord + Telegram)
+Documentação completa em [docs/vps/install.md](docs/vps/install.md).
+
+## Comandos rápidos
+
+| Ação | Comando |
+|---|---|
+| Subir tudo | `./wowctl up` |
+| Parar tudo | `./wowctl down` |
+| Status | `./wowctl status` |
+| Logs | `./wowctl logs` |
+| Backup | `./wowctl backup` |
+| Smoke test | `./wowctl smoke-test` |
+| Dev local | `make dev` |
+| Criar conta GM | `./wowctl create-account <user> <pass> 3` |
+
+## Documentação
+
+- **[docs/vps/](docs/vps/)** — Deploy VPS (instalação, operação, backup, configuração)
+- `docs/dev-setup.md` — Desenvolvimento local
+- `docs/fast-raid-vendors.md` — Vendors rápidos de raid
+- `docs/spec-bis-vendors.md` — Vendors de BiS por spec
+
+## Deploys alternativos (não oficiais)
+
+- `docs/deployment-targets.md` — k3s, Railway, Portainer
+- `docs/deployment-maintenance.md` — Manutenção k3s
+- `docker-compose.prod.yml` — Production Compose legado (usar deploy/vps/ no lugar)
+- `k8s/` — Manifests Kubernetes legados
+
+## Notificações (Discord + Telegram)
 
 ```bash
 export NOTIFY_ENABLED=true

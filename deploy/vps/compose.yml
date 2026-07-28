@@ -1,0 +1,76 @@
+services:
+  app-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${WOW_PG_DB:-wow_app}
+      POSTGRES_USER: ${WOW_PG_USER:-wow_api}
+      POSTGRES_PASSWORD: ${WOW_PG_PASSWORD:?Set WOW_PG_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - wow_pg_data:/var/lib/postgresql/data
+    networks:
+      - wow-shared
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${WOW_PG_USER:-wow_api}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  wow-backend:
+    image: ${WOW_BACKEND_IMAGE:-ghcr.io/lucaswilliameufrasio/wow-server-backend}:${WOW_BACKEND_TAG:-latest}
+    build:
+      context: ../..
+      dockerfile: Dockerfile.production
+    ports:
+      - "127.0.0.1:${WOW_API_PORT:-3000}:${WOW_API_PORT:-3000}"
+    environment:
+      AZEROTH_CORE_MYSQL_DATABASE_URL: mysql://${WOW_MYSQL_USER:-root}:${WOW_MYSQL_PASSWORD}@ac-database:3306
+      AZEROTH_CORE_AUTH_DB: acore_auth
+      AZEROTH_CORE_CHARACTERS_DB: acore_characters
+      AZEROTH_CORE_WORLD_DB: acore_world
+      APP_POSTGRES_DATABASE_URL: postgres://${WOW_PG_USER:-wow_api}:${WOW_PG_PASSWORD}@app-postgres:5432/${WOW_PG_DB:-wow_app}
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private.pem
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public.pem
+      JWT_ISSUER: ${WOW_JWT_ISSUER:-wow-backend}
+      JWT_AUDIENCE: ${WOW_JWT_AUDIENCE:-wow-web}
+      JWT_EXPIRES_MINUTES: ${WOW_JWT_EXPIRES_MINUTES:-15}
+      JWT_REFRESH_EXPIRES_DAYS: ${WOW_JWT_REFRESH_EXPIRES_DAYS:-30}
+      SRP6_CORE5_MODE: ${WOW_SRP6_CORE5_MODE:-true}
+      PORT: ${WOW_API_PORT:-3000}
+      RUST_LOG: ${WOW_RUST_LOG:-info}
+    secrets:
+      - jwt_private
+      - jwt_public
+    networks:
+      - wow-shared
+      - wow-acore
+    depends_on:
+      app-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:${WOW_API_PORT:-3000}/health-check"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  wow-shared:
+    name: wow-shared
+  wow-acore:
+    name: wow-acore
+    external: true
+
+secrets:
+  jwt_private:
+    file: ${WOW_JWT_PRIVATE_FILE:-../../.secrets/jwt_private.pem}
+  jwt_public:
+    file: ${WOW_JWT_PUBLIC_FILE:-../../.secrets/jwt_public.pem}
+
+volumes:
+  wow_pg_data:
