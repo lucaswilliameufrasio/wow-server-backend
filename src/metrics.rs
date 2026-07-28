@@ -1,29 +1,11 @@
-use axum::{response::IntoResponse};
+use axum::response::IntoResponse;
 use once_cell::sync::Lazy;
-use prometheus::{Encoder, TextEncoder, register_int_counter_vec, IntCounterVec};
-
-pub static REQUESTS: Lazy<IntCounterVec> = Lazy::new(|| {
-    register_int_counter_vec!(
-        "wow_api_requests_total",
-        "Total API requests by method and route",
-        &["method", "route"]
-    )
-    .expect("metrics register")
-});
+use prometheus::{Encoder, TextEncoder};
 
 pub static HEALTH_CHECKS: Lazy<prometheus::IntCounter> = Lazy::new(|| {
     prometheus::register_int_counter!(
         "wow_api_health_checks_total",
         "Total health check requests"
-    )
-    .expect("metrics register")
-});
-
-pub static ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
-    register_int_counter_vec!(
-        "wow_api_errors_total",
-        "Total API errors by route and status",
-        &["route", "status"]
     )
     .expect("metrics register")
 });

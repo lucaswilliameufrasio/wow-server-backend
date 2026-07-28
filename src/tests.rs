@@ -414,7 +414,7 @@ impl RefreshTokenRepo for MockRefreshTokenRepo {
 
     async fn revoke_family(&self, family_id: &str, _reason: &str) -> Result<(), ApiError> {
         let mut tokens = self.tokens_by_hash.lock().unwrap();
-        for (_, token) in tokens.iter_mut() {
+        for token in tokens.values_mut() {
             if token.family_id == family_id {
                 token.is_revoked = true;
             }
@@ -438,14 +438,11 @@ impl RefreshTokenRepo for MockRefreshTokenRepo {
         Ok(())
     }
 
-    async fn mark_rotated(&self, old_id: i64, new_id: i64) -> Result<(), ApiError> {
+    async fn mark_rotated(&self, old_id: i64, _new_id: i64) -> Result<(), ApiError> {
         let mut tokens = self.tokens_by_hash.lock().unwrap();
-        for (_, token) in tokens.iter_mut() {
+        for token in tokens.values_mut() {
             if token.id == old_id {
                 token.is_revoked = true;
-            }
-            if token.id == new_id {
-                // new token is now active
             }
         }
         Ok(())
