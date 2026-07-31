@@ -40,13 +40,13 @@ jobs:
 
           case "$ACTION" in
             start)
-              ssh -o BatchMode=yes "$TARGET" "cd $VPS_DIR && docker compose -p wow-backend-vps up -d"
-              ssh -o BatchMode=yes "$TARGET" "cd $VPS_DIR && for i in \$(seq 1 30); do curl -sf http://127.0.0.1:3000/health-check >/dev/null 2>&1 && exit 0; sleep 3; done; echo 'API nao respondeu em 90s'; exit 1"
+              ssh -o BatchMode=yes "$TARGET" "cd $VPS_DIR && ./wowctl up"
+              ssh -o BatchMode=yes "$TARGET" "cd $VPS_DIR && for i in \$(seq 1 60); do curl -sf http://127.0.0.1:3000/health-check >/dev/null 2>&1 && exit 0; sleep 3; done; echo 'API nao respondeu em 180s'; exit 1"
               ;;
             stop)
-              ssh -o BatchMode=yes "$TARGET" "cd $VPS_DIR && docker compose -p wow-backend-vps stop"
+              ssh -o BatchMode=yes "$TARGET" "cd $VPS_DIR && ./wowctl down"
               ;;
             status)
-              ssh -o BatchMode=yes "$TARGET" "cd $VPS_DIR && docker compose -p wow-backend-vps ps"
+              ssh -o BatchMode=yes "$TARGET" "cd $VPS_DIR && ./wowctl status"
               ;;
           esac
