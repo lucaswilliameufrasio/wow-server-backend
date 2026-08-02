@@ -63,7 +63,7 @@ networks:
   wow-shared:
     name: wow-shared
   wow-acore:
-    name: wow-acore
+    name: ${WOW_ACORE_NETWORK:-azerothcore-wotlk_ac-network}
     external: true
 
 secrets:
