@@ -42,8 +42,10 @@ services:
       PORT: ${WOW_API_PORT:-3000}
       RUST_LOG: ${WOW_RUST_LOG:-info}
     secrets:
-      - jwt_private
-      - jwt_public
+      - source: jwt_private
+        target: jwt_private.pem
+      - source: jwt_public
+        target: jwt_public.pem
     networks:
       - wow-shared
       - wow-acore
@@ -69,10 +71,8 @@ networks:
 secrets:
   jwt_private:
     file: ${WOW_JWT_PRIVATE_FILE:-../../.secrets/jwt_private.pem}
-    target: jwt_private.pem
   jwt_public:
     file: ${WOW_JWT_PUBLIC_FILE:-../../.secrets/jwt_public.pem}
-    target: jwt_public.pem
 
 volumes:
   wow_pg_data:
