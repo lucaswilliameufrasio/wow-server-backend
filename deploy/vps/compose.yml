@@ -69,8 +69,10 @@ networks:
 secrets:
   jwt_private:
     file: ${WOW_JWT_PRIVATE_FILE:-../../.secrets/jwt_private.pem}
+    target: jwt_private.pem
   jwt_public:
     file: ${WOW_JWT_PUBLIC_FILE:-../../.secrets/jwt_public.pem}
+    target: jwt_public.pem
 
 volumes:
   wow_pg_data:
