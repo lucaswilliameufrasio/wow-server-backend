@@ -548,7 +548,8 @@ shift 2>/dev/null || true
 
 case "$cmd" in
   install|up|down|status|logs|set-realm|create-account|smoke-test|backup|restore|update|rollback|build|help)
-    "cmd_$cmd" "$@"
+    fn="cmd_$(printf '%s' "$cmd" | tr - _)"
+    "$fn" "$@"
     ;;
   *)
     fail "Unknown command: $cmd"
