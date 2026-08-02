@@ -8,6 +8,7 @@ Deploy oficial do servidor WoW WotLK 3.3.5a em uma única VPS com Docker Compose
 - [Configuração](config.md) — Rede, portas, variáveis, Caddy
 - [Operação diária](operations.md) — Start/stop, logs, contas, atualização
 - [Backup e restauração](backup.md) — Dump, compressão, S3 opcional, cron
+- [Troubleshooting](troubleshooting.md) — SRP6/login, Postgres 18, JWT, rede do AC
 
 ## Ferramenta principal
 

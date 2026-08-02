@@ -51,20 +51,26 @@ Variáveis mínimas obrigatórias:
 | `WOW_PG_PASSWORD` | Senha do PostgreSQL da API |
 | `WOW_MYSQL_PASSWORD` | Senha root do MySQL do AzerothCore |
 
+> **Docker rootful x rootless** — o AzerothCore é compilado a partir do source no
+> primeiro `up`, e isso falha em daemons Docker rootless antigos (20.10.x). Use o
+> daemon **rootful** (moderno). Se o `docker` do seu usuário apontar para um
+> daemon rootless, rode os comandos com `sudo ./wowctl ...`. O primeiro `up`
+> demora bastante (compila authserver/worldserver + backend Rust, ~30-60min).
+
 ## 4. Instalar
 
 ```bash
 export WOW_ACORE_DIR=/opt/azerothcore-wotlk
-./wowctl install
+./wowctl install   # use: sudo ./wowctl install  se o docker do usuário for rootless
 ```
 
 ## 5. Subir serviços
 
 ```bash
-./wowctl up
+./wowctl up        # use: sudo ./wowctl up  se o docker do usuário for rootless
 ```
 
-Aguarde 2-3 minutos. O script:
+O script:
 1. Sobe MySQL e aguarda healthcheck
 2. Sobe db-import (cria os bancos do AC)
 3. Sobe authserver e worldserver
