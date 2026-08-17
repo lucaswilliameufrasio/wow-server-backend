@@ -80,7 +80,18 @@ pub fn srp6_verify(
     core5: bool,
 ) -> bool {
     let expected = srp6_calculate_verifier(username, password, salt, core5);
-    expected == verifier
+    constant_time_eq(&expected, verifier)
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 // ---------------------------------------------------------------------------
@@ -175,23 +186,25 @@ pub fn build_rbac_policy(gm_level: u8) -> RbacPolicy {
 pub fn generate_refresh_token() -> String {
     let mut bytes = [0u8; 64];
     rand::thread_rng().fill_bytes(&mut bytes);
-    bytes
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<Vec<String>>()
-        .join("")
+    to_hex(&bytes)
 }
 
 pub fn hash_refresh_token(token: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
-    let digest = hasher.finalize();
-    digest
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<Vec<String>>()
-        .join("")
+    to_hex(&hasher.finalize())
+}
+
+const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+
+pub fn to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX_CHARS[(b >> 4) as usize] as char);
+        out.push(HEX_CHARS[(b & 0x0f) as usize] as char);
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------

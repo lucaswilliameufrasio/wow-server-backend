@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ACORE_REPO_DIR="${ACORE_REPO_DIR:-/tmp/azerothcore-wotlk}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/wow-common.sh
+source "$ROOT_DIR/scripts/wow-common.sh"
+
 ITEM_REPO_DIR="${ITEM_REPO_DIR:-/tmp/wotlk-item-db}"
 ITEM_REPO_URL="${ITEM_REPO_URL:-https://github.com/thatsmybis/wotlk-item-db.git}"
 ITEM_REPO_REF="${ITEM_REPO_REF:-master}"
@@ -42,10 +45,10 @@ fi
 
 echo "Creating target DB if needed: $ITEM_DB_NAME"
 docker compose -f "$ACORE_REPO_DIR/docker-compose.yml" exec -T ac-database \
-  sh -lc "mysql -uroot -ppassword -e \"CREATE DATABASE IF NOT EXISTS \\\`$ITEM_DB_NAME\\\`;\""
+  sh -lc "mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" -e \"CREATE DATABASE IF NOT EXISTS \\\`$ITEM_DB_NAME\\\`;\""
 
 echo "Importing items SQL into $ITEM_DB_NAME from $ITEM_SQL_FILE"
 docker compose -f "$ACORE_REPO_DIR/docker-compose.yml" exec -T ac-database \
-  sh -lc "mysql -uroot -ppassword $ITEM_DB_NAME" < "$ITEM_SQL_FILE"
+  sh -lc "mysql -uroot -p\"$MYSQL_ROOT_PASSWORD\" $ITEM_DB_NAME" < "$ITEM_SQL_FILE"
 
 echo "Item seed import completed"

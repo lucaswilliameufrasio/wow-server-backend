@@ -10,12 +10,11 @@ Uma VPS Linux com Docker Compose é o destino oficial e mais simples.
 git clone <URL> /opt/wow-backend
 git clone --depth 1 https://github.com/azerothcore/azerothcore-wotlk.git /opt/azerothcore-wotlk
 cd /opt/wow-backend/deploy/vps
-cp .env.example .env
-# edite as senhas no .env
+# as senhas (PostgreSQL, MySQL, SOAP) são geradas automaticamente no .env
 ./wowctl install
 ./wowctl up
-./wowctl set-realm <IP_PUBLICO>
-./wowctl smoke-test
+# setup completo pronto pra jogar: realm + conta GM + seeds + smoke-test
+./wowctl setup-game Admin MinhaSenha123 <IP_PUBLICO>
 ```
 
 Documentação completa em [docs/vps/install.md](docs/vps/install.md).
@@ -29,9 +28,13 @@ Documentação completa em [docs/vps/install.md](docs/vps/install.md).
 | Status | `./wowctl status` |
 | Logs | `./wowctl logs` |
 | Backup | `./wowctl backup` |
+| Setup completo (GM + realm + seeds) | `./wowctl setup-game` |
+| Recarregar configs do worldserver | `./wowctl reload` |
 | Smoke test | `./wowctl smoke-test` |
 | Dev local | `make dev` |
 | Criar conta GM | `./wowctl create-account <user> <pass> 3` |
+
+O `./wowctl set-realm <IP>` atualiza o realm e grava `deploy/vps/realmlist.wtf` pronto para o cliente WoW 3.3.5a.
 
 ## Documentação
 

@@ -1,0 +1,5 @@
+# Caddyfile — used by caddy-compose.yml (values from .env).
+{$WOW_CADY_DOMAIN} {
+    encode gzip
+    reverse_proxy wow-backend:3000
+}

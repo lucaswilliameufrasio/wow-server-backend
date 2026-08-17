@@ -214,10 +214,10 @@
       "ItemListResponse": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["limit", "offset", "items"],
+        "required": ["limit", "cursor", "items"],
         "properties": {
           "limit": { "type": "integer", "minimum": 1 },
-          "offset": { "type": "integer", "minimum": 0 },
+          "cursor": { "type": ["integer", "null"], "minimum": 0 },
           "items": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/ItemSummary" }
@@ -235,7 +235,7 @@
           "last_login_unix",
           "last_ip",
           "locked",
-          "account_online",
+          "online",
           "gm_level",
           "character_count"
         ],
@@ -247,7 +247,7 @@
           "last_login_unix": { "type": ["integer", "null"] },
           "last_ip": { "type": ["string", "null"] },
           "locked": { "type": "boolean" },
-          "account_online": { "type": "boolean" },
+          "online": { "type": "boolean" },
           "gm_level": { "type": "integer", "minimum": 0 },
           "character_count": { "type": "integer", "minimum": 0 }
         }
@@ -255,10 +255,10 @@
       "AdminPlayersResponse": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["limit", "offset", "players"],
+        "required": ["limit", "cursor", "players"],
         "properties": {
           "limit": { "type": "integer", "minimum": 1 },
-          "offset": { "type": "integer", "minimum": 0 },
+          "cursor": { "type": ["integer", "null"], "minimum": 0 },
           "players": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/AdminPlayerSummary" }
@@ -398,7 +398,7 @@
       "get": {
         "parameters": [
           { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
-          { "name": "offset", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } },
+          { "name": "cursor", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } },
           { "name": "search", "in": "query", "required": false, "schema": { "type": "string" } },
           { "name": "class", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } }
         ],
@@ -424,7 +424,7 @@
       "get": {
         "parameters": [
           { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 200 } },
-          { "name": "offset", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } },
+          { "name": "cursor", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 0 } },
           { "name": "search", "in": "query", "required": false, "schema": { "type": "string" } },
           { "name": "online", "in": "query", "required": false, "schema": { "type": "boolean" } }
         ],

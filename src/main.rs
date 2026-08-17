@@ -52,6 +52,7 @@ async fn build_state() -> AppResult<AppState> {
             .unwrap_or_else(|_| "acore_characters".to_string()),
         world_db: env::var("AZEROTH_CORE_WORLD_DB").unwrap_or_else(|_| "acore_world".to_string()),
         srp6_core5_mode: parse_bool_env("SRP6_CORE5_MODE"),
+        rate_limit: parse_bool_env_with_default("WOW_RATE_LIMIT", true),
     };
 
     let jwt = build_jwt_config()?;
@@ -151,6 +152,13 @@ fn parse_bool_env(key: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn parse_bool_env_with_default(key: &str, default: bool) -> bool {
+    match env::var(key) {
+        Ok(v) => matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"),
+        Err(_) => default,
+    }
+}
+
 async fn run(app: axum::Router) -> AppResult<()> {
     let port: u16 = env::var("PORT")
         .ok()
@@ -163,9 +171,12 @@ async fn run(app: axum::Router) -> AppResult<()> {
 
     info!(%addr, %port, "listening on {addr}");
 
-    axum::serve(listener, app.into_make_service())
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     Ok(())
 }

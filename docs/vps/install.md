@@ -26,30 +26,17 @@ git clone --depth 1 --branch master \
   https://github.com/azerothcore/azerothcore-wotlk.git /opt/azerothcore-wotlk
 ```
 
-## 3. Configurar
+## 3. Instalar
+
+O `./wowctl install` cria o `.env` e **gera automaticamente as senhas fortes**
+de PostgreSQL, MySQL e SOAP (sem edição manual). Também gera as chaves JWT,
+configura o env do AzerothCore e habilita SOAP no worldserver.
 
 ```bash
 cd /opt/wow-backend/deploy/vps
-
-# Criar .env e editar senhas
-cp .env.example .env
-nano .env
+export WOW_ACORE_DIR=/opt/azerothcore-wotlk
+./wowctl install   # use: sudo ./wowctl install  se o docker do usuário for rootless
 ```
-
-No `.env`, gere senhas fortes:
-
-```bash
-# Gerar senhas de 32 caracteres
-openssl rand -base64 24   # para WOW_PG_PASSWORD
-openssl rand -base64 24   # para WOW_MYSQL_PASSWORD
-```
-
-Variáveis mínimas obrigatórias:
-
-| Variável | Descrição |
-|---|---|
-| `WOW_PG_PASSWORD` | Senha do PostgreSQL da API |
-| `WOW_MYSQL_PASSWORD` | Senha root do MySQL do AzerothCore |
 
 > **Docker rootful x rootless** — o AzerothCore é compilado a partir do source no
 > primeiro `up`, e isso falha em daemons Docker rootless antigos (20.10.x). Use o
@@ -57,14 +44,10 @@ Variáveis mínimas obrigatórias:
 > daemon rootless, rode os comandos com `sudo ./wowctl ...`. O primeiro `up`
 > demora bastante (compila authserver/worldserver + backend Rust, ~30-60min).
 
-## 4. Instalar
+> Os segredos ficam em `deploy/vps/.env` (e `$ACORE_DIR/.env`, `.secrets/`).
+> Guarde-os ou rode `./wowctl backup` depois de subir os serviços.
 
-```bash
-export WOW_ACORE_DIR=/opt/azerothcore-wotlk
-./wowctl install   # use: sudo ./wowctl install  se o docker do usuário for rootless
-```
-
-## 5. Subir serviços
+## 4. Subir serviços
 
 ```bash
 ./wowctl up        # use: sudo ./wowctl up  se o docker do usuário for rootless
@@ -76,23 +59,18 @@ O script:
 3. Sobe authserver e worldserver
 4. Sobe PostgreSQL e API
 
-## 6. Configurar realm
+## 5. Setup completo (um comando)
+
+Cria a conta GM, configura o realm, roda os seeds (itens, vendors de raid,
+vendors BiS, índice FULLTEXT) e valida tudo:
 
 ```bash
-# Se tiver IP público fixo
-./wowctl set-realm SEU_IP_PUBLICO
-
-# Se tiver domínio
-./wowctl set-realm wow.seudominio.com
+./wowctl setup-game Admin MinhaSenha123 SEU_IP_PUBLICO
 ```
 
-## 7. Verificar
+Para pular seeds individuais: `SKIP_SEED_ITEMS=true SKIP_SEED_FAST_RAID=true SKIP_SEED_SPEC_BIS=true ./wowctl setup-game`.
 
-```bash
-./wowctl smoke-test
-```
-
-## 8. Configurar firewall
+## 6. Configurar firewall
 
 ```bash
 ufw allow OpenSSH
@@ -107,15 +85,16 @@ ufw allow in on tailscale0 comment 'Tailscale'
 ufw enable
 ```
 
-## 9. Criar contas de administrador
+## 7. Cliente WoW
+
+`./wowctl set-realm` grava o `realmlist.wtf` em `deploy/vps/realmlist.wtf`
+(pode ser chamado a qualquer momento para atualizar o realm):
 
 ```bash
-./wowctl create-account Admin MinhaSenha123 3
+./wowctl set-realm SEU_IP_PUBLICO
 ```
 
-## 10. Cliente WoW
-
-Edite `realmlist.wtf` no diretório do WoW 3.3.5a:
+Copie `deploy/vps/realmlist.wtf` para o diretório do WoW 3.3.5a:
 
 ```text
 set realmlist SEU_IP_PUBLICO

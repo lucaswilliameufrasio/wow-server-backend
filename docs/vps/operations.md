@@ -52,11 +52,36 @@ Exemplo:
 ./wowctl create-account GuildMaster SenhaForte123 3
 ```
 
+## Setup completo (uma vez)
+
+Depois de subir os serviços, `setup-game` prepara tudo em um comando: conta GM,
+realm, seeds (itens, vendors de raid, vendors BiS, FULLTEXT) e smoke-test:
+
+```bash
+./wowctl setup-game Admin MinhaSenha123 SEU_IP_PUBLICO
+```
+
+Seeds individuais podem ser pulados: `SKIP_SEED_ITEMS=true`, `SKIP_SEED_FAST_RAID=true`, `SKIP_SEED_SPEC_BIS=true`.
+
+## Recarregar configs do worldserver (SOAP)
+
+Após seeds ou mudanças de config, sem reiniciar o worldserver:
+
+```bash
+./wowctl reload                # .reload config + creature/creature_template/npc_vendor/item_template
+./wowctl reload creature_template   # apenas um alvo
+```
+
+Exige SOAP habilitado (o `./wowctl install` já habilita; reinicie o worldserver
+uma vez em instalações antigas).
+
 ## Atualizar realm
 
 ```bash
 ./wowctl set-realm novo-ip-ou-dominio
 ```
+
+Além do banco, grava `deploy/vps/realmlist.wtf` — copie para o cliente WoW.
 
 ## Logs de diagnóstico
 

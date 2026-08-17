@@ -6,6 +6,7 @@ use sqlx::{MySql, MySqlPool, PgPool, QueryBuilder, Row, mysql::MySqlRow};
 use tracing::error;
 use uuid::Uuid;
 
+use crate::auth::hash_refresh_token;
 use crate::error::*;
 use crate::models::*;
 
@@ -93,8 +94,8 @@ pub trait AccountRepo: Send + Sync {
         search: Option<&str>,
         online: Option<bool>,
         limit: u32,
-        offset: u32,
-    ) -> Result<Vec<AdminPlayerSummary>, ApiError>;
+        cursor: Option<u64>,
+    ) -> Result<(Vec<AdminPlayerSummary>, Option<u64>), ApiError>;
     async fn find_online_players(&self) -> Result<Vec<OnlinePlayerSummary>, ApiError>;
 }
 
@@ -192,7 +193,7 @@ impl AccountRepo for LiveAccountRepo {
 
     async fn record_successful_login(&self, account_id: u64, ip: &str) -> Result<(), ApiError> {
         let sql = format!(
-            "UPDATE {}.account SET failed_logins = 0, last_login = NOW(), last_ip = ?, online = 1 WHERE id = ?",
+            "UPDATE {}.account SET failed_logins = 0, last_login = NOW(), last_ip = ? WHERE id = ?",
             self.auth_db
         );
         sqlx::query(&sql)
@@ -266,8 +267,8 @@ impl AccountRepo for LiveAccountRepo {
         search: Option<&str>,
         online: Option<bool>,
         limit: u32,
-        offset: u32,
-    ) -> Result<Vec<AdminPlayerSummary>, ApiError> {
+        cursor: Option<u64>,
+    ) -> Result<(Vec<AdminPlayerSummary>, Option<u64>), ApiError> {
         let base_sql = format!(
             "SELECT \
                 a.id, \
@@ -277,14 +278,15 @@ impl AccountRepo for LiveAccountRepo {
                 UNIX_TIMESTAMP(a.last_login) AS last_login_unix, \
                 a.last_ip, \
                 a.locked, \
-                a.online AS account_online, \
                 COALESCE(acc.gmlevel, 0) AS gm_level, \
-                COALESCE(chars.character_count, 0) AS character_count \
+                COALESCE(chars.character_count, 0) AS character_count, \
+                COALESCE(online_chars.online_count, 0) AS online_count \
              FROM {}.account a \
              LEFT JOIN (SELECT id, MAX(gmlevel) AS gmlevel FROM {}.account_access GROUP BY id) acc ON acc.id = a.id \
              LEFT JOIN (SELECT account, COUNT(*) AS character_count FROM {}.characters WHERE deleteDate IS NULL OR deleteDate = 0 GROUP BY account) chars ON chars.account = a.id \
+             LEFT JOIN (SELECT account, COUNT(*) AS online_count FROM {}.characters WHERE online = 1 GROUP BY account) online_chars ON online_chars.account = a.id \
              WHERE 1=1",
-            self.auth_db, self.auth_db, self.characters_db
+            self.auth_db, self.auth_db, self.characters_db, self.characters_db
         );
 
         let mut qb = QueryBuilder::<MySql>::new(base_sql);
@@ -294,14 +296,21 @@ impl AccountRepo for LiveAccountRepo {
             qb.push(" AND a.username LIKE ").push_bind(like);
         }
 
-        if let Some(online) = online {
-            qb.push(" AND a.online = ").push_bind(online);
+        if let Some(c) = cursor {
+            qb.push(" AND a.id > ").push_bind(c);
         }
 
-        qb.push(" ORDER BY a.id DESC LIMIT ")
-            .push_bind(limit)
-            .push(" OFFSET ")
-            .push_bind(offset);
+        if let Some(online) = online {
+            if online {
+                qb.push(" AND online_chars.online_count > 0");
+            } else {
+                qb.push(
+                    " AND (online_chars.online_count IS NULL OR online_chars.online_count = 0)",
+                );
+            }
+        }
+
+        qb.push(" ORDER BY a.id ASC LIMIT ").push_bind(limit + 1);
 
         let rows = qb
             .build()
@@ -310,22 +319,26 @@ impl AccountRepo for LiveAccountRepo {
             .map_err(|err| map_db_error("failed to load admin players", err))?;
 
         let mut players = Vec::with_capacity(rows.len());
-        for row in rows {
+        let mut next_cursor: Option<u64> = None;
+        if rows.len() > limit as usize {
+            next_cursor = Some(row_get::<u64>(&rows[limit as usize - 1], "id")?);
+        }
+        for row in rows.iter().take(limit as usize) {
             players.push(AdminPlayerSummary {
-                id: row_get::<u64>(&row, "id")?,
-                username: row_get::<String>(&row, "username")?,
-                email: row_get_opt::<String>(&row, "email")?,
-                joined_unix: row_get_opt::<i64>(&row, "joined_unix")?.map(|v| v as u64),
-                last_login_unix: row_get_opt::<i64>(&row, "last_login_unix")?.map(|v| v as u64),
-                last_ip: row_get_opt::<String>(&row, "last_ip")?,
-                locked: row_get_bool(&row, "locked")?,
-                account_online: row_get_bool(&row, "account_online")?,
-                gm_level: row_get::<i64>(&row, "gm_level")? as u8,
-                character_count: row_get::<i64>(&row, "character_count")? as u32,
+                id: row_get::<u64>(row, "id")?,
+                username: row_get::<String>(row, "username")?,
+                email: row_get_opt::<String>(row, "email")?,
+                joined_unix: row_get_opt::<i64>(row, "joined_unix")?.map(|v| v as u64),
+                last_login_unix: row_get_opt::<i64>(row, "last_login_unix")?.map(|v| v as u64),
+                last_ip: row_get_opt::<String>(row, "last_ip")?,
+                locked: row_get_bool(row, "locked")?,
+                online: row_get::<i64>(row, "online_count")? > 0,
+                gm_level: row_get::<i64>(row, "gm_level")? as u8,
+                character_count: row_get::<i64>(row, "character_count")? as u32,
             });
         }
 
-        Ok(players)
+        Ok((players, next_cursor))
     }
 
     async fn find_online_players(&self) -> Result<Vec<OnlinePlayerSummary>, ApiError> {
@@ -505,7 +518,7 @@ impl CharacterRepo for LiveCharacterRepo {
 
 #[async_trait]
 pub trait ItemRepo: Send + Sync {
-    async fn search(&self, query: &ItemQuery) -> Result<Vec<ItemSummary>, ApiError>;
+    async fn search(&self, query: &ItemQuery) -> Result<(Vec<ItemSummary>, Option<u32>), ApiError>;
     async fn find_by_entry(&self, entry: u32) -> Result<Option<ItemSummary>, ApiError>;
 }
 
@@ -522,52 +535,69 @@ impl LiveItemRepo {
 
 #[async_trait]
 impl ItemRepo for LiveItemRepo {
-    async fn search(&self, query: &ItemQuery) -> Result<Vec<ItemSummary>, ApiError> {
+    async fn search(&self, query: &ItemQuery) -> Result<(Vec<ItemSummary>, Option<u32>), ApiError> {
         let limit = query.limit.unwrap_or(50).min(200);
-        let offset = query.offset.unwrap_or(0);
+        let search = query
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
 
-        let mut qb = QueryBuilder::<MySql>::new(format!(
+        let base = format!(
             "SELECT entry, name, Quality, ItemLevel, class, subclass, displayid \
              FROM {}.item_template WHERE 1=1",
             self.world_db
-        ));
+        );
 
-        if let Some(class_id) = query.class {
-            qb.push(" AND class = ").push_bind(class_id);
-        }
+        let build_query = |use_fulltext: bool| {
+            let mut qb = QueryBuilder::<MySql>::new(base.clone());
+            if let Some(class_id) = query.class {
+                qb.push(" AND class = ").push_bind(class_id);
+            }
+            if let Some(c) = query.cursor {
+                qb.push(" AND entry > ").push_bind(c);
+            }
+            if let Some(s) = search {
+                if use_fulltext {
+                    qb.push(" AND MATCH (name) AGAINST (")
+                        .push_bind(s)
+                        .push(" IN BOOLEAN MODE)");
+                } else {
+                    qb.push(" AND name LIKE ").push_bind(format!("%{s}%"));
+                }
+            }
+            qb.push(" ORDER BY entry ASC LIMIT ").push_bind(limit + 1);
+            qb
+        };
 
-        if let Some(ref search) = query.search
-            && !search.trim().is_empty()
-        {
-            qb.push(" AND name LIKE ")
-                .push_bind(format!("%{}%", search.trim()));
-        }
-
-        qb.push(" ORDER BY entry ASC LIMIT ")
-            .push_bind(limit)
-            .push(" OFFSET ")
-            .push_bind(offset);
-
-        let rows = qb
-            .build()
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|err| map_db_error("failed to load items", err))?;
+        let rows = match build_query(true).build().fetch_all(&self.pool).await {
+            Ok(rows) => rows,
+            Err(_) if search.is_some() => build_query(false)
+                .build()
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|err| map_db_error("failed to load items", err))?,
+            Err(err) => return Err(map_db_error("failed to load items", err)),
+        };
 
         let mut items = Vec::with_capacity(rows.len());
-        for row in rows {
+        let mut next_cursor: Option<u32> = None;
+        if rows.len() > limit as usize {
+            next_cursor = Some(row_get::<u32>(&rows[limit as usize - 1], "entry")?);
+        }
+        for row in rows.iter().take(limit as usize) {
             items.push(ItemSummary {
-                entry: row_get::<u32>(&row, "entry")?,
-                name: row_get::<String>(&row, "name")?,
-                quality: row_get::<u8>(&row, "Quality")?,
-                item_level: row_get::<u32>(&row, "ItemLevel")?,
-                class: row_get::<u8>(&row, "class")?,
-                subclass: row_get::<u8>(&row, "subclass")?,
-                display_id: row_get::<u32>(&row, "displayid")?,
+                entry: row_get::<u32>(row, "entry")?,
+                name: row_get::<String>(row, "name")?,
+                quality: row_get::<u8>(row, "Quality")?,
+                item_level: row_get::<u32>(row, "ItemLevel")?,
+                class: row_get::<u8>(row, "class")?,
+                subclass: row_get::<u8>(row, "subclass")?,
+                display_id: row_get::<u32>(row, "displayid")?,
             });
         }
 
-        Ok(items)
+        Ok((items, next_cursor))
     }
 
     async fn find_by_entry(&self, entry: u32) -> Result<Option<ItemSummary>, ApiError> {
@@ -630,18 +660,6 @@ pub trait RefreshTokenRepo: Send + Sync {
     ) -> Result<(), ApiError>;
 }
 
-fn hash_refresh_token(token: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    let digest = hasher.finalize();
-    digest
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<Vec<String>>()
-        .join("")
-}
-
 pub struct LiveRefreshTokenRepo {
     pool: PgPool,
     refresh_expires_days: i64,
@@ -670,10 +688,17 @@ impl RefreshTokenRepo for LiveRefreshTokenRepo {
         ua: Option<&str>,
     ) -> Result<i64, ApiError> {
         let token_hash = hash_refresh_token(refresh_token);
-        let generated_family = Uuid::new_v4().to_string();
-        let family = family_id.unwrap_or(&generated_family);
         let account_id_i64 = i64::try_from(account_id)
             .map_err(|_| ApiError::internal("Account ID overflow", "ACCOUNT_ID_OVERFLOW"))?;
+
+        let owned_family;
+        let family: &str = match family_id {
+            Some(existing) => existing,
+            None => {
+                owned_family = Uuid::new_v4().to_string();
+                &owned_family
+            }
+        };
 
         let sql = format!(
             "INSERT INTO {}.auth_refresh_tokens \

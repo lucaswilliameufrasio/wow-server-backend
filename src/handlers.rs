@@ -4,6 +4,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{get, patch, post},
 };
+use std::sync::Arc;
+use tower_governor::{
+    GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor,
+};
 use utoipa::{
     OpenApi,
     openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
@@ -65,7 +69,6 @@ impl utoipa::Modify for SecurityAddon {
 pub fn build_router(state: AppState) -> Router {
     let public = Router::new()
         .route("/health-check", get(health_check_handler))
-        .route("/v1/auth/register", post(register_handler))
         .route("/v1/auth/refresh", post(refresh_token_handler))
         .route("/v1/auth/logout", post(logout_handler))
         .route("/v1/auth/me", get(auth_me_handler))
@@ -93,7 +96,23 @@ pub fn build_router(state: AppState) -> Router {
         .route("/debug/diagnostics", get(diagnostics_handler))
         .route("/metrics", get(metrics::metrics_handler));
 
-    let sign_in = Router::new().route("/v1/auth/sign-in", post(sign_in_handler));
+    let auth_public = Router::new()
+        .route("/v1/auth/register", post(register_handler))
+        .route("/v1/auth/sign-in", post(sign_in_handler));
+
+    let auth_public = if state.config.rate_limit {
+        let governor_conf = Arc::new(
+            GovernorConfigBuilder::default()
+                .key_extractor(SmartIpKeyExtractor)
+                .per_second(1)
+                .burst_size(5)
+                .finish()
+                .expect("governor config"),
+        );
+        auth_public.layer(GovernorLayer::new(governor_conf))
+    } else {
+        auth_public
+    };
 
     let docs = Router::new().merge(
         utoipa_swagger_ui::SwaggerUi::new("/swagger-ui")
@@ -101,7 +120,7 @@ pub fn build_router(state: AppState) -> Router {
     );
 
     public
-        .merge(sign_in)
+        .merge(auth_public)
         .merge(docs)
         .with_state(state)
         .fallback(not_found_handler)
@@ -305,7 +324,8 @@ async fn refresh_token_handler(
         ));
     }
 
-    let auth = crate::middleware::load_auth_context(&state, token_row.account_id, None).await?;
+    let auth =
+        crate::middleware::load_auth_context(&state, token_row.account_id, None, None).await?;
     let new_refresh_token = generate_refresh_token();
 
     let new_token_id = state
@@ -439,16 +459,15 @@ async fn admin_players_handler(
     require_permission(&auth, "players:read")?;
 
     let limit = query.limit.unwrap_or(50).min(200);
-    let offset = query.offset.unwrap_or(0);
 
-    let players = state
+    let (players, cursor) = state
         .accounts
-        .search_players(query.search.as_deref(), query.online, limit, offset)
+        .search_players(query.search.as_deref(), query.online, limit, query.cursor)
         .await?;
 
     Ok(Json(AdminPlayersResponse {
         limit,
-        offset,
+        cursor,
         players,
     }))
 }
@@ -522,11 +541,12 @@ async fn items_handler(
     let auth = authenticate(&headers, &state).await?;
     require_permission(&auth, "items:read")?;
 
-    let items = state.items.search(&query).await?;
+    let limit = query.limit.unwrap_or(50).min(200);
+    let (items, cursor) = state.items.search(&query).await?;
 
     Ok(Json(ItemListResponse {
-        limit: query.limit.unwrap_or(50).min(200),
-        offset: query.offset.unwrap_or(0),
+        limit,
+        cursor,
         items,
     }))
 }

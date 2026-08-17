@@ -7,6 +7,7 @@ pub struct AppConfig {
     pub characters_db: String,
     pub world_db: String,
     pub srp6_core5_mode: bool,
+    pub rate_limit: bool,
 }
 
 #[derive(Clone)]
@@ -154,7 +155,7 @@ pub struct CharacterLocationResponse {
 #[derive(Deserialize)]
 pub struct AdminPlayersQuery {
     pub limit: Option<u32>,
-    pub offset: Option<u32>,
+    pub cursor: Option<u64>,
     pub search: Option<String>,
     pub online: Option<bool>,
 }
@@ -168,7 +169,7 @@ pub struct AdminPlayerSummary {
     pub last_login_unix: Option<u64>,
     pub last_ip: Option<String>,
     pub locked: bool,
-    pub account_online: bool,
+    pub online: bool,
     pub gm_level: u8,
     pub character_count: u32,
 }
@@ -176,7 +177,7 @@ pub struct AdminPlayerSummary {
 #[derive(Serialize)]
 pub struct AdminPlayersResponse {
     pub limit: u32,
-    pub offset: u32,
+    pub cursor: Option<u64>,
     pub players: Vec<AdminPlayerSummary>,
 }
 
@@ -219,7 +220,7 @@ pub struct DiagnosticsResponse {
 #[derive(Deserialize)]
 pub struct ItemQuery {
     pub limit: Option<u32>,
-    pub offset: Option<u32>,
+    pub cursor: Option<u32>,
     pub search: Option<String>,
     pub class: Option<u8>,
 }
@@ -238,7 +239,7 @@ pub struct ItemSummary {
 #[derive(Serialize)]
 pub struct ItemListResponse {
     pub limit: u32,
-    pub offset: u32,
+    pub cursor: Option<u32>,
     pub items: Vec<ItemSummary>,
 }
 

@@ -16,11 +16,13 @@ Todos os comandos são centralizados no script `wowctl`:
 
 ```bash
 cd /opt/wow-backend/deploy/vps
-./wowctl install    # Primeira instalação
+./wowctl install    # Primeira instalação (gera senhas automaticamente)
 ./wowctl up         # Subir serviços
 ./wowctl down       # Parar serviços
 ./wowctl status     # Status
 ./wowctl logs       # Logs
+./wowctl setup-game # Setup completo: GM + realm + seeds + smoke-test
+./wowctl reload     # Recarregar configs do worldserver (SOAP)
 ./wowctl backup     # Backup
 ./wowctl restore    # Restaurar
 ./wowctl smoke-test # Validar

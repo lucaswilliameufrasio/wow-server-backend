@@ -1,0 +1,36 @@
+# Caddy HTTPS override — use with the base compose:
+#   docker compose -f compose.yml -f caddy-compose.yml up -d
+#
+# Requires in .env:
+#   WOW_CADY_DOMAIN=wow.example.com
+#   WOW_CADY_EMAIL=admin@example.com
+#
+# Caddy handles TLS automatically via Let's Encrypt. With this enabled the API
+# becomes reachable on the internet (the API itself still binds 127.0.0.1; the
+# reverse proxy reaches it over the wow-shared Docker network).
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      WOW_CADY_DOMAIN: ${WOW_CADY_DOMAIN:?Set WOW_CADY_DOMAIN in .env}
+      WOW_CADY_EMAIL: ${WOW_CADY_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - wow-shared
+    depends_on:
+      - wow-backend
+
+networks:
+  wow-shared:
+    name: wow-shared
+
+volumes:
+  caddy_data:
+  caddy_config:

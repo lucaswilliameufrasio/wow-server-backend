@@ -8,10 +8,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock ./
+
+RUN mkdir -p src && echo 'fn main() {}' > src/main.rs \
+    && cargo build --release
+
 COPY src ./src
 COPY migrations ./migrations
-
-RUN cargo build --release
+RUN touch src/main.rs && cargo build --release
 
 FROM debian:bookworm-slim
 WORKDIR /app

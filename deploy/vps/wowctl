@@ -30,8 +30,31 @@ require_docker() {
 
 load_env() {
   if [[ -f "$ENV_FILE" ]]; then
-    set -a; source "$ENV_FILE"; set +a
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
   fi
+}
+
+# Generate a strong password in .env only when the var is missing or still the
+# placeholder. Preserves existing values on re-runs (safe for existing installs).
+ensure_password() {
+  local var="$1"
+  local current=""
+  current="$(grep -E "^${var}=" "$ENV_FILE" | tail -1 | cut -d= -f2- || true)"
+  if [[ -n "$current" && "$current" != "CHANGE_ME_GENERATE_32_CHARS" ]]; then
+    return 0
+  fi
+  command -v openssl >/dev/null 2>&1 || fail "openssl is required to generate passwords"
+  local val
+  val="$(openssl rand -base64 24 | tr -d '\n=')"
+  if [[ -n "$current" ]]; then
+    sed -i "s|^${var}=.*|${var}=${val}|" "$ENV_FILE"
+  else
+    printf '\n%s=%s\n' "$var" "$val" >> "$ENV_FILE"
+  fi
+  ok "$var generated"
 }
 
 ac_compose() {
@@ -74,21 +97,17 @@ cmd_install() {
   # --- .env file ---
   if [[ ! -f "$ENV_FILE" ]]; then
     cp "$VPS_DIR/.env.example" "$ENV_FILE"
-    warn ".env created from .env.example — edit $ENV_FILE before continuing"
-    info "Run: nano $ENV_FILE"
-    info "Then re-run: ./wowctl install"
-    exit 0
+    ok ".env created from .env.example"
   fi
   load_env
 
-  # --- Validate required vars ---
-  local missing=0
-  for var in WOW_PG_PASSWORD WOW_MYSQL_PASSWORD; do
-    val="${!var:-}"
-    if [[ -z "$val" || "$val" == "CHANGE_ME_GENERATE_32_CHARS" ]]; then
-      fail "$var is not set or still the default — edit $ENV_FILE"
-    fi
-  done
+  # --- Auto-generate strong passwords (idempotent) ---
+  info "Ensuring passwords are set ..."
+  ensure_password WOW_PG_PASSWORD
+  ensure_password WOW_MYSQL_PASSWORD
+  ensure_password WOW_SOAP_PASSWORD
+  load_env
+  ok "Secrets configured in $ENV_FILE"
 
   # --- AzerothCore .env ---
   info "Creating AzerothCore env file ..."
@@ -126,17 +145,34 @@ WSCONF
   else
     ok "worldserver config overrides already exist"
   fi
+  if ! grep -q '^SOAP.Enabled' "$ws_conf_d/00-wowctl.conf"; then
+    cat >> "$ws_conf_d/00-wowctl.conf" <<WSCONF
+
+# wowctl — SOAP (used by ./wowctl reload)
+SOAP.Enabled = 1
+SOAP.IP = "0.0.0.0"
+SOAP.Port = 7878
+SOAP.User = "${WOW_SOAP_USER:-wowctl}"
+SOAP.Password = "${WOW_SOAP_PASSWORD}"
+WSCONF
+    ok "SOAP enabled (port 7878, local only)"
+  else
+    ok "SOAP already configured"
+  fi
 
   # --- Create backup directory ---
   mkdir -p "$BACKUP_DIR"
 
   echo ""
   info "Installation complete!"
+  info "Secrets are stored in $ENV_FILE (plus $ACORE_ENV and $SECRETS_DIR)"
+  info "Save them somewhere safe or run ./wowctl backup once services are up."
   echo ""
   info "Next steps:"
   info "  1. ./wowctl up          — start all services"
-  info "  2. ./wowctl set-realm   — configure realm address"
-  info "  3. ./wowctl smoke-test  — verify everything works"
+  info "  2. ./wowctl setup-game  — realm + GM account + seeds + smoke-test"
+  info "  3. ./wowctl set-realm   — configure realm address"
+  info "  4. ./wowctl smoke-test  — verify everything works"
   echo ""
 }
 
@@ -260,6 +296,17 @@ cmd_set_realm() {
   ac_compose exec -T ac-database mysql -uroot -p"$WOW_MYSQL_PASSWORD" acore_auth \
     -e "UPDATE realmlist SET address='$address', localAddress='$local_address' WHERE id=1"
   ok "Realm address updated"
+
+  # Write + print realmlist.wtf for the WoW 3.3.5a client
+  if [[ -f "$VPS_DIR/realmlist.wtf" ]] && grep -q '^set realmlist' "$VPS_DIR/realmlist.wtf" 2>/dev/null; then
+    sed -i "s|^set realmlist .*|set realmlist $address|" "$VPS_DIR/realmlist.wtf"
+  else
+    printf 'set realmlist %s\n' "$address" > "$VPS_DIR/realmlist.wtf"
+  fi
+  echo ""
+  info "realmlist.wtf for the client:"
+  echo "  set realmlist $address"
+  info "Written to $VPS_DIR/realmlist.wtf — copy it into your WoW 3.3.5a folder."
 }
 
 cmd_create_account() {
@@ -358,16 +405,29 @@ cmd_smoke_test() {
 
   # 6. API auth
   info "6/6 Registration endpoint ..."
-  local reg_resp
-  reg_resp=$(curl -sf -o /dev/null -w '%{http_code}' \
-    -X POST "http://127.0.0.1:$port/v1/auth/register" \
+  local reg_resp reg_code body smoke_account_id
+  reg_resp=$(curl -sf -w '\n%{http_code}' -X POST "http://127.0.0.1:$port/v1/auth/register" \
     -H 'content-type: application/json' \
-    -d '{"username":"__smoke_test__","password":"SmokeTest123"}' 2>/dev/null || echo "fail")
-  if [[ "$reg_resp" == "201" || "$reg_resp" == "409" ]]; then
-    ok "  Registration endpoint responds (HTTP $reg_resp)"
+    -d '{"username":"__smoke_test__","password":"SmokeTest123"}' 2>/dev/null || true)
+  reg_code=$(echo "$reg_resp" | tail -1)
+  body=$(echo "$reg_resp" | head -n -1)
+  smoke_account_id=$(echo "$body" | python3 -c "import sys,json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('account_id', ''))
+except Exception:
+    print('')" 2>/dev/null || echo "")
+  if [[ "$reg_code" == "201" || "$reg_code" == "409" ]]; then
+    ok "  Registration endpoint responds (HTTP $reg_code)"
   else
-    warn "  Registration endpoint returned HTTP $reg_resp"
+    warn "  Registration endpoint returned HTTP $reg_code"
     errors=$((errors + 1))
+  fi
+  if [[ -n "$smoke_account_id" ]]; then
+    ac_compose exec -T ac-database mysql -uroot -p"$WOW_MYSQL_PASSWORD" acore_auth \
+      -e "DELETE FROM account_access WHERE id=$smoke_account_id; DELETE FROM account WHERE id=$smoke_account_id" \
+      >/dev/null 2>&1
+    ok "  Removed smoke-test account (id: $smoke_account_id)"
   fi
 
   echo ""
@@ -452,8 +512,12 @@ cmd_restore() {
       warn "PostgreSQL not accessible; restore manually:"
       echo "  cat $dir/postgres_all.sql | docker compose -f $COMPOSE_FILE exec -T app-postgres psql -U ${WOW_PG_USER:-wow_api} postgres"
     }
-    be_compose exec -T app-postgres psql -U "${WOW_PG_USER:-wow_api}" \
-      < "$dir/postgres_all.sql" 2>/dev/null && ok "PostgreSQL restored" || warn "PostgreSQL restore had issues"
+    if be_compose exec -T app-postgres psql -U "${WOW_PG_USER:-wow_api}" \
+      < "$dir/postgres_all.sql" 2>/dev/null; then
+      ok "PostgreSQL restored"
+    else
+      warn "PostgreSQL restore had issues"
+    fi
   fi
 
   rm -rf "$restore_dir"
@@ -505,6 +569,122 @@ cmd_build() {
   info "Update .env: WOW_BACKEND_IMAGE=$tag and WOW_BACKEND_TAG=latest"
 }
 
+# --- SOAP --------------------------------------------------------------------
+
+soap_call() {
+  local cmd="$1"
+  local url="http://127.0.0.1:${WOW_SOAP_PORT:-7878}/"
+  local user="${WOW_SOAP_USER:-wowctl}"
+  local pass="${WOW_SOAP_PASSWORD:-}"
+  local body
+  body="$(cat <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/">
+<SOAP-ENV:Body>
+<command>
+<user>${user}</user>
+<pass>${pass}</pass>
+<cmd>${cmd}</cmd>
+</command>
+</SOAP-ENV:Body>
+</SOAP-ENV:Envelope>
+XML
+)"
+  curl -sf -X POST -H 'content-type: text/xml' --data-binary "$body" "$url"
+}
+
+cmd_reload() {
+  require_docker; load_env
+  local targets="${1:-all}"
+  if [[ -z "${WOW_SOAP_PASSWORD:-}" ]]; then
+    fail "SOAP not configured — re-run ./wowctl install or set WOW_SOAP_PASSWORD in $ENV_FILE"
+  fi
+  local cmds=()
+  case "$targets" in
+    all)
+      cmds=(
+        ".reload config"
+        ".reload creature_template"
+        ".reload creature"
+        ".reload npc_vendor"
+        ".reload item_template"
+      ) ;;
+    *)
+      cmds=(".reload $targets") ;;
+  esac
+  for c in "${cmds[@]}"; do
+    info "SOAP > $c"
+    local resp
+    resp="$(soap_call "$c" 2>/dev/null)" || {
+      warn "SOAP call failed for '$c' (is worldserver running with SOAP enabled?)"
+      continue
+    }
+    local summary
+    summary="$(echo "$resp" | tr '\n' ' ' | sed 's/<[^>]*>//g' | tr -s ' ' | xargs)"
+    ok "${summary:-command sent}"
+  done
+}
+
+# --- One-shot game setup -----------------------------------------------------
+
+cmd_setup_game() {
+  require_docker; load_env
+  local port="${WOW_API_PORT:-3000}"
+  if ! curl -sf "http://127.0.0.1:$port/health-check" >/dev/null 2>&1; then
+    fail "API is not responding on port $port — run ./wowctl up first"
+  fi
+
+  # 1. Admin GM account
+  local admin_user="${1:-Admin}"
+  local admin_pass="${2:-}"
+  if [[ -z "$admin_pass" ]]; then
+    admin_pass="$(openssl rand -base64 12 | tr -d '\n=')"
+    info "Generated admin password for '$admin_user': $admin_pass"
+  fi
+  cmd_create_account "$admin_user" "$admin_pass" 3
+
+  # 2. Realm
+  local realm="${3:-}"
+  if [[ -z "$realm" && -t 0 ]]; then
+    read -rp "Realm public IP or domain (empty to skip): " realm
+  fi
+  if [[ -n "$realm" ]]; then
+    cmd_set_realm "$realm"
+  else
+    warn "Realm not set — run: ./wowctl set-realm <IP_OR_DOMAIN>"
+  fi
+
+  # 3. Seeds (each skippable)
+  if [[ "${SKIP_SEED_ITEMS:-false}" != "true" ]]; then
+    info "Seeding item database ..."
+    (
+      cd "$REPO_DIR"
+      ACORE_REPO_DIR="$ACORE_DIR" WOW_MYSQL_PASSWORD="$WOW_MYSQL_PASSWORD" ./scripts/seed-items.sh
+    )
+  fi
+  if [[ "${SKIP_SEED_FAST_RAID:-false}" != "true" ]]; then
+    info "Seeding fast raid-prep vendors (+ FULLTEXT index) ..."
+    (
+      cd "$REPO_DIR"
+      ACORE_REPO_DIR="$ACORE_DIR" WOW_MYSQL_PASSWORD="$WOW_MYSQL_PASSWORD" ./scripts/seed-fast-raid-vendors.sh
+    )
+  fi
+  if [[ "${SKIP_SEED_SPEC_BIS:-false}" != "true" ]]; then
+    info "Seeding spec BiS preset vendors ..."
+    (
+      cd "$REPO_DIR"
+      ACORE_REPO_DIR="$ACORE_DIR" WOW_MYSQL_PASSWORD="$WOW_MYSQL_PASSWORD" ./scripts/seed-spec-bis-vendors.sh
+    )
+  fi
+
+  # 4. Reload worldserver configs + validate
+  info "Reloading worldserver configs via SOAP ..."
+  cmd_reload all || true
+
+  echo ""
+  cmd_smoke_test
+}
+
 cmd_help() {
   cat <<HELP
 Usage: ./wowctl <command> [options]
@@ -520,8 +700,10 @@ Lifecycle:
   logs [service]            Tail logs (service: ac-authserver, ac-worldserver, etc.)
 
 Configuration:
-  set-realm [ip] [localIP]  Update realm address in database
+  set-realm [ip] [localIP]  Update realm address in database (+ write realmlist.wtf)
   create-account <user> <pass> [gmlevel]  Create WoW account via API
+  setup-game [admin] [pass] [realm]  One-shot: GM account + realm + seeds + reload + smoke-test
+  reload [target]           Reload worldserver configs via SOAP (default: all)
 
 Validation:
   smoke-test            Run smoke tests (6 checks)
@@ -547,12 +729,14 @@ cmd="${1:-help}"
 shift 2>/dev/null || true
 
 case "$cmd" in
-  install|up|down|status|logs|set-realm|create-account|smoke-test|backup|restore|update|rollback|build|help)
+  install|up|down|status|logs|set-realm|create-account|setup-game|reload|smoke-test|backup|restore|update|rollback|build|help)
     fn="cmd_$(printf '%s' "$cmd" | tr - _)"
     "$fn" "$@"
     ;;
   *)
-    fail "Unknown command: $cmd"
+    warn "Unknown command: $cmd"
+    echo ""
     cmd_help
+    exit 1
     ;;
 esac

@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ACORE_REPO_DIR="${ACORE_REPO_DIR:-/tmp/azerothcore-wotlk}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/wow-common.sh
+source "$ROOT_DIR/scripts/wow-common.sh"
+
 ACORE_REPO_URL="${ACORE_REPO_URL:-https://github.com/azerothcore/azerothcore-wotlk.git}"
 ACORE_REF="${ACORE_REF:-master}"
 
@@ -31,7 +34,7 @@ docker compose -f "$ACORE_REPO_DIR/docker-compose.yml" up -d --build
 echo "Waiting for MySQL in ac-database..."
 for _ in $(seq 1 120); do
   if docker compose -f "$ACORE_REPO_DIR/docker-compose.yml" exec -T ac-database \
-      mysqladmin ping -h127.0.0.1 -uroot -ppassword >/dev/null 2>&1; then
+      mysqladmin ping -h127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" >/dev/null 2>&1; then
     echo "MySQL is ready"
     exit 0
   fi

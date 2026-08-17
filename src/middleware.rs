@@ -40,7 +40,13 @@ pub async fn authenticate(headers: &HeaderMap, state: &AppState) -> Result<AuthC
         return Err(ApiError::unauthorized("Token revoked", "TOKEN_REVOKED"));
     }
 
-    load_auth_context(state, decoded.claims.sub, Some(decoded.claims.jti)).await
+    load_auth_context(
+        state,
+        decoded.claims.sub,
+        Some(decoded.claims.jti),
+        Some(decoded.claims.gm_level),
+    )
+    .await
 }
 
 pub fn require_permission(auth: &AuthContext, permission: &str) -> Result<(), ApiError> {
@@ -62,6 +68,7 @@ pub(crate) async fn load_auth_context(
     state: &AppState,
     account_id: u64,
     access_jti: Option<String>,
+    gm_level_override: Option<u8>,
 ) -> Result<AuthContext, ApiError> {
     let auth_row = state
         .accounts
@@ -76,7 +83,10 @@ pub(crate) async fn load_auth_context(
         ));
     }
 
-    let gm_level = state.accounts.get_gm_level(account_id).await;
+    let gm_level = match gm_level_override {
+        Some(level) => level,
+        None => state.accounts.get_gm_level(account_id).await,
+    };
     let policy = build_rbac_policy(gm_level);
 
     Ok(AuthContext {

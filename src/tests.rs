@@ -151,18 +151,18 @@ impl AccountRepo for MockAccountRepo {
         search: Option<&str>,
         _online: Option<bool>,
         limit: u32,
-        offset: u32,
-    ) -> Result<Vec<AdminPlayerSummary>, ApiError> {
+        cursor: Option<u64>,
+    ) -> Result<(Vec<AdminPlayerSummary>, Option<u64>), ApiError> {
         let by_name = self.accounts_by_name.lock().unwrap();
-        let mut players: Vec<AdminPlayerSummary> = by_name
+        let mut filtered: Vec<AdminPlayerSummary> = by_name
             .iter()
-            .filter(|(name, _)| {
-                search
+            .filter(|(name, row)| {
+                let matches_search = search
                     .map(|s| name.contains(&s.to_uppercase()))
-                    .unwrap_or(true)
+                    .unwrap_or(true);
+                let matches_cursor = cursor.map(|c| row.id > c).unwrap_or(true);
+                matches_search && matches_cursor
             })
-            .skip(offset as usize)
-            .take(limit as usize)
             .map(|(_, row)| AdminPlayerSummary {
                 id: row.id,
                 username: row.username.clone(),
@@ -171,13 +171,21 @@ impl AccountRepo for MockAccountRepo {
                 last_login_unix: None,
                 last_ip: None,
                 locked: row.locked,
-                account_online: false,
+                online: false,
                 gm_level: 0,
                 character_count: 0,
             })
             .collect();
-        players.reverse();
-        Ok(players)
+        filtered.sort_by_key(|p| p.id);
+
+        let limit = limit as usize;
+        let next_cursor = if filtered.len() > limit {
+            Some(filtered[limit - 1].id)
+        } else {
+            None
+        };
+        filtered.truncate(limit);
+        Ok((filtered, next_cursor))
     }
 
     async fn find_online_players(&self) -> Result<Vec<OnlinePlayerSummary>, ApiError> {
@@ -295,9 +303,9 @@ impl MockItemRepo {
 
 #[async_trait]
 impl ItemRepo for MockItemRepo {
-    async fn search(&self, query: &ItemQuery) -> Result<Vec<ItemSummary>, ApiError> {
+    async fn search(&self, query: &ItemQuery) -> Result<(Vec<ItemSummary>, Option<u32>), ApiError> {
         let items = self.items.lock().unwrap();
-        let mut result: Vec<ItemSummary> = items
+        let mut filtered: Vec<ItemSummary> = items
             .iter()
             .filter(|item| {
                 query
@@ -307,12 +315,19 @@ impl ItemRepo for MockItemRepo {
                     .unwrap_or(true)
             })
             .filter(|item| query.class.map(|c| item.class == c).unwrap_or(true))
-            .skip(query.offset.unwrap_or(0) as usize)
-            .take(query.limit.unwrap_or(50).min(200) as usize)
+            .filter(|item| query.cursor.map(|c| item.entry > c).unwrap_or(true))
             .cloned()
             .collect();
-        result.sort_by_key(|i| i.entry);
-        Ok(result)
+        filtered.sort_by_key(|i| i.entry);
+
+        let limit = query.limit.unwrap_or(50).min(200) as usize;
+        let next_cursor = if filtered.len() > limit {
+            Some(filtered[limit - 1].entry)
+        } else {
+            None
+        };
+        filtered.truncate(limit);
+        Ok((filtered, next_cursor))
     }
 
     async fn find_by_entry(&self, entry: u32) -> Result<Option<ItemSummary>, ApiError> {
@@ -536,6 +551,7 @@ fn test_state(
             characters_db: "acore_characters".to_string(),
             world_db: "acore_world".to_string(),
             srp6_core5_mode: false,
+            rate_limit: false,
         },
         jwt: test_jwt_config(),
         accounts: std::sync::Arc::new(accounts),
@@ -1403,6 +1419,78 @@ async fn items_search_returns_results() {
 }
 
 #[tokio::test]
+async fn items_cursor_pagination_returns_next_page() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0u8; 32],
+        verifier: vec![0u8; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+
+    let items = MockItemRepo::new();
+    for entry in [100u32, 101, 102, 103] {
+        items.add_item(ItemSummary {
+            entry,
+            name: format!("Item {entry}"),
+            quality: 1,
+            item_level: 10,
+            class: 0,
+            subclass: 0,
+            display_id: 1,
+        });
+    }
+
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        items,
+        MockRefreshTokenRepo::new(),
+    );
+    let token = issue_test_token(&test_jwt_config(), 1, "ADMIN", 3);
+    let app = build_router(state);
+
+    let page1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/items?limit=2")
+                .header(AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(page1.status(), StatusCode::OK);
+    let body1 = body_json(page1).await;
+    assert_eq!(body1["items"].as_array().unwrap().len(), 2);
+    assert_eq!(body1["items"][0]["entry"], 100);
+    assert_eq!(body1["items"][1]["entry"], 101);
+    let cursor = body1["cursor"].as_u64().unwrap();
+    assert_eq!(cursor, 101);
+
+    let page2 = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/items?limit=2&cursor={cursor}"))
+                .header(AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(page2.status(), StatusCode::OK);
+    let body2 = body_json(page2).await;
+    assert_eq!(body2["items"].as_array().unwrap().len(), 2);
+    assert_eq!(body2["items"][0]["entry"], 102);
+    assert_eq!(body2["items"][1]["entry"], 103);
+    assert!(body2["cursor"].is_null(), "no more pages");
+}
+
+#[tokio::test]
 async fn item_by_entry_found() {
     let accounts = MockAccountRepo::new();
     accounts.add_account(SignInAccountRow {
@@ -1819,6 +1907,80 @@ async fn admin_players_forbidden_for_regular_player() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
+#[tokio::test]
+async fn admin_players_cursor_pagination_returns_next_page() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "PLAYER1".to_string(),
+        email: None,
+        salt: vec![0u8; 32],
+        verifier: vec![0u8; 32],
+        locked: false,
+    });
+    accounts.add_account(SignInAccountRow {
+        id: 2,
+        username: "PLAYER2".to_string(),
+        email: None,
+        salt: vec![0u8; 32],
+        verifier: vec![0u8; 32],
+        locked: false,
+    });
+    accounts.add_account(SignInAccountRow {
+        id: 3,
+        username: "PLAYER3".to_string(),
+        email: None,
+        salt: vec![0u8; 32],
+        verifier: vec![0u8; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let token = issue_test_token(&test_jwt_config(), 1, "PLAYER1", 3);
+    let app = build_router(state);
+
+    let page1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/players?limit=2")
+                .header(AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(page1.status(), StatusCode::OK);
+    let body1 = body_json(page1).await;
+    assert_eq!(body1["players"].as_array().unwrap().len(), 2);
+    assert_eq!(body1["players"][0]["id"], 1);
+    assert_eq!(body1["players"][1]["id"], 2);
+    let cursor = body1["cursor"].as_u64().unwrap();
+    assert_eq!(cursor, 2);
+
+    let page2 = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/admin/players?limit=2&cursor={cursor}"))
+                .header(AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(page2.status(), StatusCode::OK);
+    let body2 = body_json(page2).await;
+    assert_eq!(body2["players"].as_array().unwrap().len(), 1);
+    assert_eq!(body2["players"][0]["id"], 3);
+    assert!(body2["cursor"].is_null(), "no more pages");
+}
+
 // ---------------------------------------------------------------------------
 // Tests for read_client_ip and read_user_agent
 // ---------------------------------------------------------------------------
@@ -1896,6 +2058,7 @@ async fn integration_refresh_token_store_find_revoke() {
             characters_db: String::new(),
             world_db: String::new(),
             srp6_core5_mode: false,
+            rate_limit: false,
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),
@@ -1991,6 +2154,7 @@ async fn integration_access_token_revocation_roundtrip() {
             characters_db: String::new(),
             world_db: String::new(),
             srp6_core5_mode: false,
+            rate_limit: false,
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),
