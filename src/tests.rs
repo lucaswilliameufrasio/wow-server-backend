@@ -146,6 +146,14 @@ impl AccountRepo for MockAccountRepo {
         }
     }
 
+    fn login_is_locked(&self, _account_id: u64) -> bool {
+        false
+    }
+
+    fn record_login_failure(&self, _account_id: u64) {}
+
+    fn reset_login_lockout(&self, _account_id: u64) {}
+
     async fn search_players(
         &self,
         search: Option<&str>,
@@ -552,6 +560,7 @@ fn test_state(
             world_db: "acore_world".to_string(),
             srp6_core5_mode: false,
             rate_limit: false,
+            debug_enabled: false,
         },
         jwt: test_jwt_config(),
         accounts: std::sync::Arc::new(accounts),
@@ -2059,6 +2068,7 @@ async fn integration_refresh_token_store_find_revoke() {
             world_db: String::new(),
             srp6_core5_mode: false,
             rate_limit: false,
+            debug_enabled: false,
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),
@@ -2155,6 +2165,7 @@ async fn integration_access_token_revocation_roundtrip() {
             world_db: String::new(),
             srp6_core5_mode: false,
             rate_limit: false,
+            debug_enabled: false,
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),

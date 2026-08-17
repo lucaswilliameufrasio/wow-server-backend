@@ -67,6 +67,8 @@ impl utoipa::Modify for SecurityAddon {
 }
 
 pub fn build_router(state: AppState) -> Router {
+    let debug_enabled = state.config.debug_enabled;
+
     let public = Router::new()
         .route("/health-check", get(health_check_handler))
         .route("/v1/auth/refresh", post(refresh_token_handler))
@@ -93,8 +95,13 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/admin/online-players",
             get(admin_online_players_handler),
         )
-        .route("/debug/diagnostics", get(diagnostics_handler))
         .route("/metrics", get(metrics::metrics_handler));
+
+    let public = if debug_enabled {
+        public.route("/debug/diagnostics", get(diagnostics_handler))
+    } else {
+        public
+    };
 
     let auth_public = Router::new()
         .route("/v1/auth/register", post(register_handler))
@@ -123,6 +130,27 @@ pub fn build_router(state: AppState) -> Router {
         .merge(auth_public)
         .merge(docs)
         .with_state(state)
+        .layer(axum::middleware::from_fn(
+            crate::observability::track_request,
+        ))
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            std::time::Duration::from_secs(30),
+        ))
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(64 * 1024))
+        .layer(
+            tower_http::cors::CorsLayer::new()
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::PATCH,
+                    axum::http::Method::OPTIONS,
+                ])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                ]),
+        )
         .fallback(not_found_handler)
 }
 
@@ -212,9 +240,18 @@ async fn sign_in_handler(
         .ok_or_else(|| ApiError::unauthorized("Invalid credentials", "INVALID_CREDENTIALS"))?;
 
     if account.locked {
+        metrics::record_login("locked");
         return Err(ApiError::unauthorized(
             "Account is locked",
             "ACCOUNT_LOCKED",
+        ));
+    }
+
+    if state.accounts.login_is_locked(account.id) {
+        metrics::record_login("temp_locked");
+        return Err(ApiError::unauthorized(
+            "Too many failed attempts. Try again later.",
+            "ACCOUNT_TEMP_LOCKED",
         ));
     }
 
@@ -227,12 +264,17 @@ async fn sign_in_handler(
     );
 
     if !password_ok {
+        metrics::record_login("failed");
+        state.accounts.record_login_failure(account.id);
         state.accounts.increment_failed_logins(account.id).await?;
         return Err(ApiError::unauthorized(
             "Invalid credentials",
             "INVALID_CREDENTIALS",
         ));
     }
+
+    metrics::record_login("success");
+    state.accounts.reset_login_lockout(account.id);
 
     let client_ip = read_client_ip(&headers);
     state

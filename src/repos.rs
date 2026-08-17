@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -56,6 +56,92 @@ pub fn row_get_bool(row: &MySqlRow, column: &str) -> Result<bool, ApiError> {
 // AppState
 // ---------------------------------------------------------------------------
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+/// TTL cache for `find_auth` results (account_id -> username + locked flag).
+/// Eliminates the per-request MySQL roundtrip in `load_auth_context`.
+struct AuthCache {
+    entries: Mutex<HashMap<u64, (Instant, AuthAccountRow)>>,
+    ttl: Duration,
+}
+
+impl Default for AuthCache {
+    fn default() -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+            ttl: Duration::from_secs(30),
+        }
+    }
+}
+
+impl AuthCache {
+    fn get(&self, account_id: u64) -> Option<AuthAccountRow> {
+        let entries = self.entries.lock().unwrap();
+        entries.get(&account_id).and_then(|(ts, row)| {
+            if ts.elapsed() > self.ttl {
+                None
+            } else {
+                Some(row.clone())
+            }
+        })
+    }
+
+    fn put(&self, account_id: u64, row: AuthAccountRow) {
+        self.entries
+            .lock()
+            .unwrap()
+            .insert(account_id, (Instant::now(), row));
+    }
+
+    fn invalidate(&self, account_id: u64) {
+        self.entries.lock().unwrap().remove(&account_id);
+    }
+}
+
+/// In-memory per-account login lockout (fixed window).
+/// Tracks recent failed sign-in attempts to block brute force per account.
+struct LoginLockout {
+    attempts: Mutex<HashMap<u64, (Instant, u32)>>,
+    window: Duration,
+    max_attempts: u32,
+}
+
+impl Default for LoginLockout {
+    fn default() -> Self {
+        Self {
+            attempts: Mutex::new(HashMap::new()),
+            window: Duration::from_secs(300),
+            max_attempts: 5,
+        }
+    }
+}
+
+impl LoginLockout {
+    fn is_locked(&self, account_id: u64) -> bool {
+        let attempts = self.attempts.lock().unwrap();
+        attempts
+            .get(&account_id)
+            .map(|(ts, n)| ts.elapsed() <= self.window && *n >= self.max_attempts)
+            .unwrap_or(false)
+    }
+
+    fn record_failure(&self, account_id: u64) {
+        let mut attempts = self.attempts.lock().unwrap();
+        let now = Instant::now();
+        let (ts, n) = attempts
+            .get(&account_id)
+            .map(|(ts, n)| (*ts, *n))
+            .unwrap_or((now, 0));
+        let n = if ts.elapsed() > self.window { 1 } else { n + 1 };
+        attempts.insert(account_id, (now, n));
+    }
+
+    fn reset(&self, account_id: u64) {
+        self.attempts.lock().unwrap().remove(&account_id);
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: AppConfig,
@@ -89,6 +175,9 @@ pub trait AccountRepo: Send + Sync {
     async fn find_auth(&self, account_id: u64) -> Result<Option<AuthAccountRow>, ApiError>;
     async fn find_username(&self, account_id: u64) -> Result<Option<String>, ApiError>;
     async fn update_lock(&self, account_id: u64, locked: bool) -> Result<bool, ApiError>;
+    fn login_is_locked(&self, account_id: u64) -> bool;
+    fn record_login_failure(&self, account_id: u64);
+    fn reset_login_lockout(&self, account_id: u64);
     async fn search_players(
         &self,
         search: Option<&str>,
@@ -103,6 +192,8 @@ pub struct LiveAccountRepo {
     pool: MySqlPool,
     auth_db: String,
     characters_db: String,
+    auth_cache: AuthCache,
+    login_lockout: LoginLockout,
 }
 
 impl LiveAccountRepo {
@@ -111,6 +202,8 @@ impl LiveAccountRepo {
             pool,
             auth_db,
             characters_db,
+            auth_cache: AuthCache::default(),
+            login_lockout: LoginLockout::default(),
         }
     }
 }
@@ -218,6 +311,9 @@ impl AccountRepo for LiveAccountRepo {
     }
 
     async fn find_auth(&self, account_id: u64) -> Result<Option<AuthAccountRow>, ApiError> {
+        if let Some(row) = self.auth_cache.get(account_id) {
+            return Ok(Some(row));
+        }
         let sql = format!(
             "SELECT username, locked FROM {}.account WHERE id = ? LIMIT 1",
             self.auth_db
@@ -228,12 +324,29 @@ impl AccountRepo for LiveAccountRepo {
             .await
             .map_err(|err| map_db_error("failed to load auth account", err))?;
         match row {
-            Some(row) => Ok(Some(AuthAccountRow {
-                username: row_get(&row, "username")?,
-                locked: row_get_bool(&row, "locked")?,
-            })),
+            Some(row) => {
+                let auth_row = AuthAccountRow {
+                    username: row_get(&row, "username")?,
+                    locked: row_get_bool(&row, "locked")?,
+                };
+                self.auth_cache.put(account_id, auth_row.clone());
+                Ok(Some(auth_row))
+            }
             None => Ok(None),
         }
+    }
+
+    fn login_is_locked(&self, account_id: u64) -> bool {
+        self.login_lockout.is_locked(account_id)
+    }
+
+    fn record_login_failure(&self, account_id: u64) {
+        self.login_lockout.record_failure(account_id);
+    }
+
+    fn reset_login_lockout(&self, account_id: u64) {
+        self.login_lockout.reset(account_id);
+        self.auth_cache.invalidate(account_id);
     }
 
     async fn find_username(&self, account_id: u64) -> Result<Option<String>, ApiError> {
@@ -259,6 +372,7 @@ impl AccountRepo for LiveAccountRepo {
             .execute(&self.pool)
             .await
             .map_err(|err| map_db_error("failed to update account lock", err))?;
+        self.auth_cache.invalidate(account_id);
         Ok(result.rows_affected() > 0)
     }
 
@@ -859,5 +973,31 @@ impl RefreshTokenRepo for LiveRefreshTokenRepo {
             .await
             .map_err(|err| map_db_error("failed to revoke access token", err))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod login_lockout_tests {
+    use super::LoginLockout;
+
+    #[test]
+    fn locks_after_max_attempts() {
+        let lockout = LoginLockout::default();
+        assert!(!lockout.is_locked(1));
+        for _ in 0..5 {
+            lockout.record_failure(1);
+        }
+        assert!(lockout.is_locked(1));
+    }
+
+    #[test]
+    fn resets_after_success() {
+        let lockout = LoginLockout::default();
+        for _ in 0..6 {
+            lockout.record_failure(1);
+        }
+        assert!(lockout.is_locked(1));
+        lockout.reset(1);
+        assert!(!lockout.is_locked(1));
     }
 }

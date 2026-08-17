@@ -61,6 +61,35 @@ services:
       retries: 3
       start_period: 30s
 
+  # Optional scheduled backup (enabled when WOW_BACKUP_SCHEDULE is set, e.g. "0 3 * * *").
+  wow-backup:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      WOW_PG_USER: ${WOW_PG_USER:-wow_api}
+      WOW_PG_PASSWORD: ${WOW_PG_PASSWORD:-}
+      WOW_MYSQL_PASSWORD: ${WOW_MYSQL_PASSWORD:-}
+      WOW_BACKUP_RETENTION_DAYS: ${WOW_BACKUP_RETENTION_DAYS:-30}
+      WOW_BACKUP_SCHEDULE: ${WOW_BACKUP_SCHEDULE:-0 3 * * *}
+    volumes:
+      - ./wow-backup.sh:/usr/local/bin/wow-backup.sh:ro
+      - wow_backup_data:/backups
+    networks:
+      - wow-shared
+      - wow-acore
+    depends_on:
+      app-postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        apk add --no-cache mysql-client >/dev/null 2>&1 || true
+        echo "$${WOW_BACKUP_SCHEDULE} root /usr/local/bin/wow-backup.sh >> /var/log/wow-backup.log 2>&1" > /etc/crontabs/root
+        echo "[backup] cron scheduled: $${WOW_BACKUP_SCHEDULE}"
+        touch /var/log/wow-backup.log
+        crond -f
+
 networks:
   wow-shared:
     name: wow-shared
@@ -76,3 +105,4 @@ secrets:
 
 volumes:
   wow_pg_data:
+  wow_backup_data:

@@ -23,6 +23,7 @@ uuid = { version = "1.18.1", features = ["v4"] }
 async-trait = "0.1.88"
 prometheus = { version = "0.14", features = ["process"] }
 tower_governor = "0.8"
+tower-http = { version = "0.6", features = ["timeout", "request-id", "cors", "limit"] }
 utoipa = { version = "5.5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
 

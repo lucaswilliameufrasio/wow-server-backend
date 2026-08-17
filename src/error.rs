@@ -27,6 +27,8 @@ pub enum AppError {
     Migrate(#[from] MigrateError),
     #[error("failed to create jwt config: {0}")]
     JwtConfig(String),
+    #[error("invalid configuration: {0}")]
+    Config(String),
     #[error("server error: {0}")]
     Serve(#[from] std::io::Error),
 }
@@ -83,6 +85,7 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        crate::metrics::record_error(self.error_code);
         (
             self.status,
             Json(ErrorResponse {

@@ -8,6 +8,7 @@ pub struct AppConfig {
     pub world_db: String,
     pub srp6_core5_mode: bool,
     pub rate_limit: bool,
+    pub debug_enabled: bool,
 }
 
 #[derive(Clone)]

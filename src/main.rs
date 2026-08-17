@@ -4,6 +4,7 @@ mod handlers;
 mod metrics;
 mod middleware;
 mod models;
+mod observability;
 mod repos;
 
 use std::{env, fs, net::SocketAddr, sync::Arc};
@@ -53,7 +54,17 @@ async fn build_state() -> AppResult<AppState> {
         world_db: env::var("AZEROTH_CORE_WORLD_DB").unwrap_or_else(|_| "acore_world".to_string()),
         srp6_core5_mode: parse_bool_env("SRP6_CORE5_MODE"),
         rate_limit: parse_bool_env_with_default("WOW_RATE_LIMIT", true),
+        debug_enabled: parse_bool_env_with_default("WOW_DEBUG_ENABLED", false),
     };
+
+    // Validate DB names to prevent SQL identifier injection via config.
+    for name in [&config.auth_db, &config.characters_db, &config.world_db] {
+        if !is_safe_identifier(name) {
+            return Err(AppError::Config(format!(
+                "unsafe database name configured: {name:?} (only [A-Za-z0-9_] allowed)"
+            )));
+        }
+    }
 
     let jwt = build_jwt_config()?;
     run_app_migrations(&app_pool).await?;
@@ -150,6 +161,10 @@ fn parse_bool_env(key: &str) -> bool {
     env::var(key)
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false)
+}
+
+fn is_safe_identifier(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn parse_bool_env_with_default(key: &str, default: bool) -> bool {
