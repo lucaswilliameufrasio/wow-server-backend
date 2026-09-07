@@ -73,6 +73,9 @@ ports:
 | `WOW_JWT_EXPIRES_MINUTES` | `15` | Expiração do access token |
 | `WOW_JWT_REFRESH_EXPIRES_DAYS` | `30` | Expiração do refresh token |
 | `WOW_BACKEND_IMAGE` | `ghcr.io/lucaswilliameufrasio/wow-server-backend` | Imagem do backend |
+| `WOW_NOTIFY_ENABLED` | `false` | Liga notificações de eventos administrativos via webhook |
+| `WOW_DISCORD_WEBHOOK_URL` | — | Webhook do Discord (canal `#ops` por exemplo) |
+| `WOW_TELEGRAM_BOT_TOKEN` | — | Token do bot do Telegram (com `WOW_TELEGRAM_CHAT_ID`) |
 | `WOW_BACKEND_TAG` | `latest` | Tag da imagem |
 | `WOW_ACORE_PROJECT` | `azerothcore-wotlk` | Nome do projeto Compose do AC |
 | `WOW_ACORE_NETWORK` | `azerothcore-wotlk_ac-network` | Rede Docker externa criada pelo compose do AC |

@@ -630,6 +630,7 @@ fn test_state_custom(
             gm_command_enabled,
             gm_command_allowlist,
             acore_logs_dir,
+            notify: crate::notify::NotifyConfig::disabled(),
         },
         jwt: test_jwt_config(),
         accounts: std::sync::Arc::new(accounts),
@@ -639,6 +640,7 @@ fn test_state_custom(
         service_tokens: std::sync::Arc::new(MockServiceTokenRepo::new()),
         audit: std::sync::Arc::new(audit),
         soap,
+        notifier: crate::notify::Notifier::disabled(),
         started_at: 0,
     }
 }
@@ -2145,6 +2147,7 @@ async fn integration_refresh_token_store_find_revoke() {
             gm_command_enabled: false,
             gm_command_allowlist: None,
             acore_logs_dir: None,
+            notify: crate::notify::NotifyConfig::disabled(),
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),
@@ -2158,6 +2161,7 @@ async fn integration_refresh_token_store_find_revoke() {
         service_tokens: Arc::new(MockServiceTokenRepo::new()),
         audit: Arc::new(LiveAuditRepo::new(pool)),
         soap: None,
+        notifier: crate::notify::Notifier::disabled(),
         started_at: 0,
     };
 
@@ -2249,6 +2253,7 @@ async fn integration_access_token_revocation_roundtrip() {
             gm_command_enabled: false,
             gm_command_allowlist: None,
             acore_logs_dir: None,
+            notify: crate::notify::NotifyConfig::disabled(),
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),
@@ -2262,6 +2267,7 @@ async fn integration_access_token_revocation_roundtrip() {
         service_tokens: Arc::new(MockServiceTokenRepo::new()),
         audit: Arc::new(LiveAuditRepo::new(pool)),
         soap: None,
+        notifier: crate::notify::Notifier::disabled(),
         started_at: 0,
     };
 
@@ -3687,4 +3693,84 @@ fn openapi_covers_all_v1_routes() {
             "schema {schema} missing from OpenAPI components"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Webhook notifications (HTTP delivery)
+// ---------------------------------------------------------------------------
+
+type CapturedBodies = std::sync::Arc<tokio::sync::Mutex<Vec<serde_json::Value>>>;
+
+async fn spawn_webhook_capture_server() -> (String, CapturedBodies) {
+    let captured: CapturedBodies = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let app = {
+        let captured = captured.clone();
+        axum::Router::new()
+            .route(
+                "/hook",
+                axum::routing::post(
+                    |axum::extract::State(captured): axum::extract::State<CapturedBodies>,
+                     body: String| async move {
+                        if let Ok(value) = serde_json::from_str(&body) {
+                            captured.lock().await.push(value);
+                        } else {
+                            captured.lock().await.push(serde_json::Value::String(body));
+                        }
+                        axum::http::StatusCode::OK
+                    },
+                ),
+            )
+            .with_state(captured)
+    };
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve");
+    });
+
+    (format!("http://{addr}/hook"), captured)
+}
+
+#[tokio::test]
+async fn notifier_delivers_sanitized_payload_to_webhook() {
+    let (url, captured) = spawn_webhook_capture_server().await;
+
+    let notifier = crate::notify::Notifier::new(crate::notify::NotifyConfig {
+        enabled: true,
+        discord_webhook_url: Some(url),
+        telegram_bot_token: None,
+        telegram_chat_id: None,
+    });
+
+    notifier.notify(crate::notify::AdminEvent {
+        action: "player.ban",
+        actor_username: "Admin",
+        actor_account_id: 42,
+        target_type: "account",
+        target_id: Some("Cheater"),
+        details: &json!({ "days": 7, "password": "should-not-leak" }),
+    });
+
+    // Delivery runs in a spawned task; poll until the capture server sees it.
+    let mut seen = None;
+    for _ in 0..50 {
+        let current = captured.lock().await.clone();
+        if let Some(value) = current.into_iter().next() {
+            seen = Some(value);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    let payload = seen.expect("webhook should receive exactly one delivery");
+    let content = payload["content"].as_str().expect("discord content field");
+    assert!(content.contains("[wow-backend] player.ban"));
+    assert!(content.contains("actor: Admin (42)"));
+    assert!(content.contains("target: account:Cheater"));
+    assert!(content.contains("days"));
+    assert!(!content.contains("should-not-leak"));
+    assert!(content.contains("[redacted]"));
 }

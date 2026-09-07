@@ -274,12 +274,21 @@ async fn write_audit(
         action: action.to_string(),
         target_type: target_type.to_string(),
         target_id: target_id.map(|v| v.to_string()),
-        details: Some(details),
+        details: Some(details.clone()),
     };
 
     if let Err(err) = state.audit.insert(entry).await {
         tracing::warn!(error = ?err, "failed to write audit log entry");
     }
+
+    state.notifier.notify(crate::notify::AdminEvent {
+        action,
+        actor_username: &auth.username,
+        actor_account_id: actor,
+        target_type,
+        target_id,
+        details: &details,
+    });
 }
 
 async fn require_permission_audited(

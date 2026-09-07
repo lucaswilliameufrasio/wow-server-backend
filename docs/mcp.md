@@ -142,4 +142,10 @@ mcp/
 5. **Feito** — audit log + `lock_account` com `dry_run`/confirmação + `get_audit_log`.
 6. **Feito** — integração WorldServer via SOAP na API → status, announce, restart,
    kick, ban/unban + `run_gm_command` atrás de flag + allowlist.
-7. Pendente: teleport, give item, dinheiro, level, `get_crashes`, `get_server_logs`.
+7. **Feito** — player modify (teleport, give item, dinheiro, level) +
+   `get_server_logs` / `get_crashes` (tail de `Server.log` / `Crash.log`,
+   opt-in via `AZEROTH_CORE_LOGS_DIR`).
+8. **Feito** — notificações de eventos administrativos: a API envia
+   `kick`, `ban`, `unban`, `restart`, `announce`, `GM command`, lock/unlock e
+   service tokens para Discord/Telegram de forma assíncrona (`NOTIFY_ENABLED`),
+   com sanitização de segredos e retry único; nunca bloqueia nem falha a request.

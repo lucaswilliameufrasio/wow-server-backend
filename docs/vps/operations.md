@@ -52,6 +52,12 @@ Exemplo:
 ./wowctl create-account GuildMaster SenhaForte123 3
 ```
 
+## Notificações de eventos administrativos
+
+Opcional: com `WOW_NOTIFY_ENABLED=true` + webhook no `deploy/vps/.env`, a API
+avisa kick/ban/restart/GM command/lock/tokens no Discord/Telegram, assíncrono
+e com segredos sanitizados. Veja `docs/vps/config.md`.
+
 ## Service tokens (MCP/automação)
 
 ```bash

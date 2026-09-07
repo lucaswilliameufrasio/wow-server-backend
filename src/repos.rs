@@ -154,6 +154,7 @@ pub struct AppState {
     pub audit: Arc<dyn AuditRepo>,
     pub soap: Option<Arc<dyn crate::soap::SoapClient>>,
     pub started_at: u64,
+    pub notifier: crate::notify::Notifier,
 }
 
 // ---------------------------------------------------------------------------

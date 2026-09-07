@@ -48,6 +48,11 @@ services:
       AZEROTH_CORE_SOAP_PASSWORD: ${WOW_SOAP_PASSWORD:-}
       WOW_ENABLE_GM_COMMANDS: ${WOW_ENABLE_GM_COMMANDS:-false}
       RUST_LOG: ${WOW_RUST_LOG:-info}
+      # Optional: admin event notifications (Discord / Telegram), off by default.
+      NOTIFY_ENABLED: ${WOW_NOTIFY_ENABLED:-false}
+      DISCORD_WEBHOOK_URL: ${WOW_DISCORD_WEBHOOK_URL:-}
+      TELEGRAM_BOT_TOKEN: ${WOW_TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${WOW_TELEGRAM_CHAT_ID:-}
       # Optional: worldserver log tail endpoints (/v1/admin/server/logs|crashes).
       # Uncomment both this env and the volume below, pointing WOW_ACORE_LOGS_DIR
       # at the host directory that holds Server.log/Crash.log.

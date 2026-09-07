@@ -4,6 +4,7 @@ mod handlers;
 mod metrics;
 mod middleware;
 mod models;
+mod notify;
 mod observability;
 mod repos;
 mod soap;
@@ -67,6 +68,12 @@ async fn build_state() -> AppResult<AppState> {
             .ok()
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty()),
+        notify: crate::notify::NotifyConfig {
+            enabled: parse_bool_env_with_default("NOTIFY_ENABLED", false),
+            discord_webhook_url: non_empty_env("DISCORD_WEBHOOK_URL"),
+            telegram_bot_token: non_empty_env("TELEGRAM_BOT_TOKEN"),
+            telegram_chat_id: non_empty_env("TELEGRAM_CHAT_ID"),
+        },
     };
 
     // Validate DB names to prevent SQL identifier injection via config.
@@ -117,6 +124,7 @@ async fn build_state() -> AppResult<AppState> {
         service_tokens: Arc::new(LiveServiceTokenRepo::new(app_pool.clone())),
         audit: Arc::new(LiveAuditRepo::new(app_pool)),
         soap,
+        notifier: crate::notify::Notifier::new(config.notify.clone()),
     })
 }
 
@@ -184,6 +192,13 @@ pub(crate) async fn run_app_migrations(pool: &sqlx::PgPool) -> AppResult<()> {
     static APP_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
     APP_MIGRATOR.run(pool).await?;
     Ok(())
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 fn parse_bool_env(key: &str) -> bool {

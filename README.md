@@ -52,9 +52,24 @@ O `./wowctl set-realm <IP>` atualiza o realm e grava `deploy/vps/realmlist.wtf` 
 
 ## Notificações (Discord + Telegram)
 
+Dois produtores independentes, mesmo formato de destino:
+
+**Scripts operacionais** (backup/update — `scripts/notify-webhooks.sh`):
+
 ```bash
 export NOTIFY_ENABLED=true
 export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 export TELEGRAM_BOT_TOKEN="123456:ABC..."
 export TELEGRAM_CHAT_ID="-1001234567890"
+```
+
+**Eventos administrativos da API** (kick, ban, restart, GM command, service
+tokens, lock...) — configure no `deploy/vps/.env` da VPS; a API envia de forma
+assíncrona (nunca bloqueia a resposta) e sanitiza segredos:
+
+```bash
+WOW_NOTIFY_ENABLED=true
+WOW_DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+WOW_TELEGRAM_BOT_TOKEN="123456:ABC..."
+WOW_TELEGRAM_CHAT_ID="-1001234567890"
 ```

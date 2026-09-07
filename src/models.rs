@@ -13,6 +13,7 @@ pub struct AppConfig {
     pub gm_command_enabled: bool,
     pub gm_command_allowlist: Option<Vec<String>>,
     pub acore_logs_dir: Option<String>,
+    pub notify: crate::notify::NotifyConfig,
 }
 
 #[derive(Clone)]
