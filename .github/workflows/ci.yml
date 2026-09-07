@@ -86,3 +86,10 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Make GHCR package public (idempotent)
+        run: |
+          gh api -X PATCH "/user/packages/container/${GITHUB_REPOSITORY#*/}" \
+            -f visibility=public || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
