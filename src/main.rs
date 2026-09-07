@@ -16,10 +16,13 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::error::AppResult;
-use crate::handlers::build_router;
+use crate::handlers::{build_metrics_router, build_router};
 use error::AppError;
 use models::{AppConfig, JwtConfig};
-use repos::{AppState, LiveAccountRepo, LiveCharacterRepo, LiveItemRepo, LiveRefreshTokenRepo};
+use repos::{
+    AppState, LiveAccountRepo, LiveCharacterRepo, LiveItemRepo, LiveRefreshTokenRepo,
+    LiveServiceTokenRepo,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -84,10 +87,11 @@ async fn build_state() -> AppResult<AppState> {
         )),
         items: Arc::new(LiveItemRepo::new(acore_pool, config.world_db.clone())),
         refresh_tokens: Arc::new(LiveRefreshTokenRepo::new(
-            app_pool,
+            app_pool.clone(),
             jwt.refresh_expires_days,
             jwt.expires_minutes,
         )),
+        service_tokens: Arc::new(LiveServiceTokenRepo::new(app_pool)),
     })
 }
 
@@ -179,19 +183,55 @@ async fn run(app: axum::Router) -> AppResult<()> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(3000);
+    let metrics_port: u16 = env::var("METRICS_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(9090);
+    let metrics_bind = env::var("METRICS_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let metrics_addr: SocketAddr = format!("{metrics_bind}:{metrics_port}")
+        .parse()
+        .map_err(|_| AppError::Config(format!("invalid METRICS_BIND: {metrics_bind}")))?;
+
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr)
         .await
         .map_err(|source| AppError::Bind { source, addr })?;
+    let metrics_listener =
+        TcpListener::bind(metrics_addr)
+            .await
+            .map_err(|source| AppError::Bind {
+                source,
+                addr: metrics_addr,
+            })?;
 
     info!(%addr, %port, "listening on {addr}");
+    info!(addr = %metrics_addr, "metrics (Prometheus) listening");
 
-    axum::serve(
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let metrics_app = build_metrics_router();
+    let metrics_task = tokio::spawn(async move {
+        axum::serve(metrics_listener, metrics_app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.changed().await;
+            })
+            .await
+    });
+
+    let shutdown = async move {
+        shutdown_signal().await;
+        let _ = shutdown_tx.send(true);
+    };
+
+    let result = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    .with_graceful_shutdown(shutdown)
+    .await;
+
+    let _ = metrics_task.await;
+    result?;
 
     Ok(())
 }

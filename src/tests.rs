@@ -567,6 +567,7 @@ fn test_state(
         characters: std::sync::Arc::new(characters),
         items: std::sync::Arc::new(items),
         refresh_tokens: std::sync::Arc::new(refresh_tokens),
+        service_tokens: std::sync::Arc::new(MockServiceTokenRepo::new()),
         started_at: 0,
     }
 }
@@ -2079,6 +2080,7 @@ async fn integration_refresh_token_store_find_revoke() {
             jwt.refresh_expires_days,
             jwt.expires_minutes,
         )),
+        service_tokens: Arc::new(MockServiceTokenRepo::new()),
         started_at: 0,
     };
 
@@ -2176,6 +2178,7 @@ async fn integration_access_token_revocation_roundtrip() {
             jwt.refresh_expires_days,
             jwt.expires_minutes,
         )),
+        service_tokens: Arc::new(MockServiceTokenRepo::new()),
         started_at: 0,
     };
 
@@ -2202,4 +2205,284 @@ async fn integration_access_token_revocation_roundtrip() {
     assert!(now_revoked, "jti should be revoked after revoke_access");
 
     drop(container);
+}
+
+// ---------------------------------------------------------------------------
+// Mock ServiceTokenRepo
+// ---------------------------------------------------------------------------
+
+struct MockServiceTokenRepo {
+    next_id: Mutex<i64>,
+    tokens: Mutex<HashMap<i64, MockServiceToken>>,
+}
+
+struct MockServiceToken {
+    hash: String,
+    name: String,
+    created_by: i64,
+    expires_at_unix: Option<i64>,
+    revoked: bool,
+}
+
+impl MockServiceTokenRepo {
+    fn new() -> Self {
+        Self {
+            next_id: Mutex::new(1),
+            tokens: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl ServiceTokenRepo for MockServiceTokenRepo {
+    async fn create(
+        &self,
+        token_hash: &str,
+        name: &str,
+        created_by: i64,
+        expires_at_unix: Option<i64>,
+    ) -> Result<i64, ApiError> {
+        let mut next_id = self.next_id.lock().unwrap();
+        let id = *next_id;
+        *next_id += 1;
+        self.tokens.lock().unwrap().insert(
+            id,
+            MockServiceToken {
+                hash: token_hash.to_string(),
+                name: name.to_string(),
+                created_by,
+                expires_at_unix,
+                revoked: false,
+            },
+        );
+        Ok(id)
+    }
+
+    async fn list(&self) -> Result<Vec<ServiceTokenRow>, ApiError> {
+        let tokens = self.tokens.lock().unwrap();
+        let mut rows: Vec<ServiceTokenRow> = tokens
+            .iter()
+            .map(|(id, t)| ServiceTokenRow {
+                id: *id,
+                name: t.name.clone(),
+                created_by: t.created_by,
+                created_at_unix: 0,
+                expires_at_unix: t.expires_at_unix,
+                revoked_at_unix: if t.revoked { Some(1) } else { None },
+                last_used_at_unix: None,
+            })
+            .collect();
+        rows.sort_by_key(|r| std::cmp::Reverse(r.id));
+        Ok(rows)
+    }
+
+    async fn find_active_by_hash(&self, token_hash: &str) -> Result<Option<(i64, i64)>, ApiError> {
+        let tokens = self.tokens.lock().unwrap();
+        Ok(tokens
+            .iter()
+            .find(|(_, t)| t.hash == token_hash && !t.revoked)
+            .map(|(id, t)| (*id, t.created_by)))
+    }
+
+    async fn revoke(&self, token_id: i64) -> Result<bool, ApiError> {
+        let mut tokens = self.tokens.lock().unwrap();
+        match tokens.get_mut(&token_id) {
+            Some(t) if !t.revoked => {
+                t.revoked = true;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn touch_last_used(&self, _token_id: i64) -> Result<(), ApiError> {
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Service token endpoint tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_service_token_requires_admin() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 2,
+        username: "PLAYER2".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(2, 0);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let jwt = issue_test_token(&state.jwt, 2, "PLAYER2", 0);
+    let app = build_router(state);
+    let payload = json!({ "name": "mcp" }).to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/service-tokens")
+                .header(AUTHORIZATION, format!("Bearer {jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn service_token_full_lifecycle() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let admin_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+
+    let app = build_router(state);
+
+    let payload = json!({ "name": "mcp-local", "expires_in_days": 30 }).to_string();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/service-tokens")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("create response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    let token = body["token"]
+        .as_str()
+        .expect("token in response")
+        .to_string();
+    assert!(token.starts_with("wowst_"));
+    let token_id = body["id"].as_i64().expect("id in response");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/players")
+                .header(AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("authed response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/admin/service-tokens/{token_id}"))
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("revoke response");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/players")
+                .header(AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("revoked token response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = body_json(response).await;
+    assert_eq!(body["error_code"], "INVALID_SERVICE_TOKEN");
+}
+
+#[tokio::test]
+async fn unknown_service_token_is_rejected() {
+    let app = build_router(default_test_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/online-players")
+                .header(AUTHORIZATION, "Bearer wowst_deadbeef")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = body_json(response).await;
+    assert_eq!(body["error_code"], "INVALID_SERVICE_TOKEN");
+}
+
+#[tokio::test]
+async fn metrics_router_serves_prometheus_on_dedicated_router() {
+    let app = build_metrics_router();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("metrics response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn main_router_no_longer_serves_metrics() {
+    let app = build_router(default_test_state());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

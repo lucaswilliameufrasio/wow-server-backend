@@ -107,8 +107,13 @@ docker exec ac-database mysql -uroot -p"$WOW_MYSQL_PASSWORD" acore_characters \
 curl -s http://127.0.0.1:3000/health-check
 # {"message":"ok"}
 
-curl -s http://127.0.0.1:3000/metrics
-# Métricas Prometheus
+# Métricas Prometheus (porta dedicada e privada, sem publicação no compose)
+docker compose -p wow-backend-vps exec wow-backend \
+  wget -qO- http://127.0.0.1:9090/metrics | head
+
+# Ou, com SSH tunnel:
+ssh -L 9090:127.0.0.1:9090 user@vps
+curl -s http://127.0.0.1:9090/metrics
 ```
 
 ## Swagger UI

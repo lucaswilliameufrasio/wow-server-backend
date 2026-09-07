@@ -9,6 +9,10 @@ use crate::repos::*;
 pub async fn authenticate(headers: &HeaderMap, state: &AppState) -> Result<AuthContext, ApiError> {
     let token = extract_bearer_token(headers)?;
 
+    if token.starts_with(SERVICE_TOKEN_PREFIX) {
+        return authenticate_service_token(&token, state).await;
+    }
+
     let mut validation = Validation::new(Algorithm::RS256);
     validation.set_issuer(&[state.jwt.issuer.as_str()]);
     validation.set_audience(&[state.jwt.audience.as_str()]);
@@ -47,6 +51,28 @@ pub async fn authenticate(headers: &HeaderMap, state: &AppState) -> Result<AuthC
         Some(decoded.claims.gm_level),
     )
     .await
+}
+
+async fn authenticate_service_token(
+    token: &str,
+    state: &AppState,
+) -> Result<AuthContext, ApiError> {
+    let token_hash = hash_refresh_token(token);
+    let found = state
+        .service_tokens
+        .find_active_by_hash(&token_hash)
+        .await?
+        .ok_or_else(|| ApiError::unauthorized("Invalid service token", "INVALID_SERVICE_TOKEN"))?;
+
+    let (token_id, created_by) = found;
+    let account_id = u64::try_from(created_by)
+        .map_err(|_| ApiError::unauthorized("Invalid service token", "INVALID_SERVICE_TOKEN"))?;
+
+    if let Err(err) = state.service_tokens.touch_last_used(token_id).await {
+        tracing::warn!(error = ?err, "failed to update service token last_used_at");
+    }
+
+    load_auth_context(state, account_id, None, None).await
 }
 
 pub fn require_permission(auth: &AuthContext, permission: &str) -> Result<(), ApiError> {

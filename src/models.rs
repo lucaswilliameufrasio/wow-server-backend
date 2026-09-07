@@ -218,6 +218,36 @@ pub struct DiagnosticsResponse {
     pub uptime_seconds: u64,
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct CreateServiceTokenRequest {
+    pub name: String,
+    pub expires_in_days: Option<u32>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct CreateServiceTokenResponse {
+    pub id: i64,
+    pub name: String,
+    pub token: String,
+    pub expires_at_unix: Option<u64>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ServiceTokenSummary {
+    pub id: i64,
+    pub name: String,
+    pub created_by: u64,
+    pub created_at_unix: u64,
+    pub expires_at_unix: Option<u64>,
+    pub revoked_at_unix: Option<u64>,
+    pub last_used_at_unix: Option<u64>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ServiceTokenListResponse {
+    pub tokens: Vec<ServiceTokenSummary>,
+}
+
 #[derive(Deserialize)]
 pub struct ItemQuery {
     pub limit: Option<u32>,

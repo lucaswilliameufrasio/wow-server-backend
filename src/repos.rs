@@ -150,6 +150,7 @@ pub struct AppState {
     pub characters: Arc<dyn CharacterRepo>,
     pub items: Arc<dyn ItemRepo>,
     pub refresh_tokens: Arc<dyn RefreshTokenRepo>,
+    pub service_tokens: Arc<dyn ServiceTokenRepo>,
     pub started_at: u64,
 }
 
@@ -999,5 +1000,176 @@ mod login_lockout_tests {
         assert!(lockout.is_locked(1));
         lockout.reset(1);
         assert!(!lockout.is_locked(1));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ServiceTokenRepo
+// ---------------------------------------------------------------------------
+
+pub const SERVICE_TOKEN_PREFIX: &str = "wowst_";
+
+#[derive(Debug, Clone)]
+pub struct ServiceTokenRow {
+    pub id: i64,
+    pub name: String,
+    pub created_by: i64,
+    pub created_at_unix: i64,
+    pub expires_at_unix: Option<i64>,
+    pub revoked_at_unix: Option<i64>,
+    pub last_used_at_unix: Option<i64>,
+}
+
+#[async_trait]
+pub trait ServiceTokenRepo: Send + Sync {
+    async fn create(
+        &self,
+        token_hash: &str,
+        name: &str,
+        created_by: i64,
+        expires_at_unix: Option<i64>,
+    ) -> Result<i64, ApiError>;
+    async fn list(&self) -> Result<Vec<ServiceTokenRow>, ApiError>;
+    async fn find_active_by_hash(&self, token_hash: &str) -> Result<Option<(i64, i64)>, ApiError>;
+    async fn revoke(&self, token_id: i64) -> Result<bool, ApiError>;
+    async fn touch_last_used(&self, token_id: i64) -> Result<(), ApiError>;
+}
+
+pub struct LiveServiceTokenRepo {
+    pool: PgPool,
+}
+
+impl LiveServiceTokenRepo {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl ServiceTokenRepo for LiveServiceTokenRepo {
+    async fn create(
+        &self,
+        token_hash: &str,
+        name: &str,
+        created_by: i64,
+        expires_at_unix: Option<i64>,
+    ) -> Result<i64, ApiError> {
+        let sql = format!(
+            "INSERT INTO {}.auth_service_tokens \
+             (token_hash, name, created_by, expires_at) \
+             VALUES ($1, $2, $3, CASE WHEN $4::BIGINT IS NULL THEN NULL \
+               ELSE to_timestamp($4::BIGINT) END) \
+             RETURNING id",
+            APP_PG_SCHEMA
+        );
+
+        let id = sqlx::query_scalar::<_, i64>(&sql)
+            .bind(token_hash)
+            .bind(name)
+            .bind(created_by)
+            .bind(expires_at_unix)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|err| map_db_error("failed to create service token", err))?;
+
+        Ok(id)
+    }
+
+    async fn list(&self) -> Result<Vec<ServiceTokenRow>, ApiError> {
+        let sql = format!(
+            "SELECT id, name, created_by, \
+             EXTRACT(EPOCH FROM created_at)::BIGINT AS created_at_unix, \
+             EXTRACT(EPOCH FROM expires_at)::BIGINT AS expires_at_unix, \
+             EXTRACT(EPOCH FROM revoked_at)::BIGINT AS revoked_at_unix, \
+             EXTRACT(EPOCH FROM last_used_at)::BIGINT AS last_used_at_unix \
+             FROM {}.auth_service_tokens ORDER BY created_at DESC",
+            APP_PG_SCHEMA
+        );
+
+        let rows = sqlx::query(&sql)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| map_db_error("failed to list service tokens", err))?;
+
+        let mut tokens = Vec::with_capacity(rows.len());
+        for row in rows {
+            tokens.push(ServiceTokenRow {
+                id: row.try_get("id").map_err(|_| {
+                    ApiError::internal("Invalid database row format", "ROW_DECODE_FAILED")
+                })?,
+                name: row.try_get("name").map_err(|_| {
+                    ApiError::internal("Invalid database row format", "ROW_DECODE_FAILED")
+                })?,
+                created_by: row.try_get("created_by").map_err(|_| {
+                    ApiError::internal("Invalid database row format", "ROW_DECODE_FAILED")
+                })?,
+                created_at_unix: row.try_get::<i64, _>("created_at_unix").unwrap_or(0),
+                expires_at_unix: row.try_get("expires_at_unix").unwrap_or(None),
+                revoked_at_unix: row.try_get("revoked_at_unix").unwrap_or(None),
+                last_used_at_unix: row.try_get("last_used_at_unix").unwrap_or(None),
+            });
+        }
+
+        Ok(tokens)
+    }
+
+    async fn find_active_by_hash(&self, token_hash: &str) -> Result<Option<(i64, i64)>, ApiError> {
+        let sql = format!(
+            "SELECT id, created_by FROM {}.auth_service_tokens \
+             WHERE token_hash = $1 AND revoked_at IS NULL \
+               AND (expires_at IS NULL OR expires_at > NOW()) \
+             LIMIT 1",
+            APP_PG_SCHEMA
+        );
+
+        let row = sqlx::query(&sql)
+            .bind(token_hash)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|err| map_db_error("failed to load service token", err))?;
+
+        match row {
+            Some(row) => {
+                let id = row.try_get("id").map_err(|_| {
+                    ApiError::internal("Invalid database row format", "ROW_DECODE_FAILED")
+                })?;
+                let created_by = row.try_get("created_by").map_err(|_| {
+                    ApiError::internal("Invalid database row format", "ROW_DECODE_FAILED")
+                })?;
+                Ok(Some((id, created_by)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn revoke(&self, token_id: i64) -> Result<bool, ApiError> {
+        let sql = format!(
+            "UPDATE {}.auth_service_tokens SET revoked_at = NOW() \
+             WHERE id = $1 AND revoked_at IS NULL",
+            APP_PG_SCHEMA
+        );
+
+        let result = sqlx::query(&sql)
+            .bind(token_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| map_db_error("failed to revoke service token", err))?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn touch_last_used(&self, token_id: i64) -> Result<(), ApiError> {
+        let sql = format!(
+            "UPDATE {}.auth_service_tokens SET last_used_at = NOW() WHERE id = $1",
+            APP_PG_SCHEMA
+        );
+
+        sqlx::query(&sql)
+            .bind(token_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| map_db_error("failed to update service token last used", err))?;
+
+        Ok(())
     }
 }

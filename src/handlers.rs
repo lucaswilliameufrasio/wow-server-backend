@@ -2,7 +2,7 @@ use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post},
 };
 use std::sync::Arc;
 use tower_governor::{
@@ -38,6 +38,10 @@ use crate::repos::*;
             SignInRequest,
             SignInResponse,
             DiagnosticsResponse,
+            CreateServiceTokenRequest,
+            CreateServiceTokenResponse,
+            ServiceTokenSummary,
+            ServiceTokenListResponse,
         )
     ),
     tags(
@@ -95,7 +99,18 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/admin/online-players",
             get(admin_online_players_handler),
         )
-        .route("/metrics", get(metrics::metrics_handler));
+        .route(
+            "/v1/admin/service-tokens",
+            get(admin_list_service_tokens_handler),
+        )
+        .route(
+            "/v1/admin/service-tokens",
+            post(admin_create_service_token_handler),
+        )
+        .route(
+            "/v1/admin/service-tokens/{token_id}",
+            delete(admin_revoke_service_token_handler),
+        );
 
     let public = if debug_enabled {
         public.route("/debug/diagnostics", get(diagnostics_handler))
@@ -151,6 +166,12 @@ pub fn build_router(state: AppState) -> Router {
                     axum::http::header::AUTHORIZATION,
                 ]),
         )
+        .fallback(not_found_handler)
+}
+
+pub fn build_metrics_router() -> Router {
+    Router::new()
+        .route("/metrics", get(metrics::metrics_handler))
         .fallback(not_found_handler)
 }
 
@@ -634,4 +655,135 @@ async fn diagnostics_handler(
         rust_version: env!("CARGO_PKG_RUST_VERSION"),
         uptime_seconds: uptime,
     }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/service-tokens",
+    request_body = CreateServiceTokenRequest,
+    responses(
+        (status = 200, description = "Service token created (token shown only once)", body = CreateServiceTokenResponse),
+        (status = 400, description = "Invalid name or expiry", body = ErrorResponse),
+        (status = 403, description = "Requires tokens:manage", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_create_service_token_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CreateServiceTokenRequest>,
+) -> Result<Json<CreateServiceTokenResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    require_permission(&auth, "tokens:manage")?;
+
+    let name = body.name.trim();
+    if name.is_empty() || name.len() > 100 {
+        return Err(ApiError::bad_request(
+            "Token name must be 1-100 characters",
+            "INVALID_TOKEN_NAME",
+        ));
+    }
+
+    let expires_in_days = body.expires_in_days;
+    if let Some(days) = expires_in_days
+        && (days == 0 || days > 3650)
+    {
+        return Err(ApiError::bad_request(
+            "expires_in_days must be between 1 and 3650",
+            "INVALID_TOKEN_EXPIRY",
+        ));
+    }
+
+    let created_by = i64::try_from(auth.account_id)
+        .map_err(|_| ApiError::internal("Account ID overflow", "ACCOUNT_ID_OVERFLOW"))?;
+
+    let mut secret = [0u8; 32];
+    use rand::RngCore;
+    rand::thread_rng().fill_bytes(&mut secret);
+    let token = format!("{}{}", SERVICE_TOKEN_PREFIX, to_hex(&secret));
+    let token_hash = hash_refresh_token(&token);
+
+    let expires_at_unix =
+        expires_in_days.map(|days| crate::auth::unix_now() + u64::from(days) * 86_400);
+
+    let id = state
+        .service_tokens
+        .create(
+            &token_hash,
+            name,
+            created_by,
+            expires_at_unix.map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
+        )
+        .await?;
+
+    Ok(Json(CreateServiceTokenResponse {
+        id,
+        name: name.to_string(),
+        token,
+        expires_at_unix,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/admin/service-tokens",
+    responses(
+        (status = 200, description = "List service tokens", body = ServiceTokenListResponse),
+        (status = 403, description = "Requires tokens:manage", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_list_service_tokens_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ServiceTokenListResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    require_permission(&auth, "tokens:manage")?;
+
+    let rows = state.service_tokens.list().await?;
+
+    let tokens = rows
+        .into_iter()
+        .map(|row| ServiceTokenSummary {
+            id: row.id,
+            name: row.name,
+            created_by: u64::try_from(row.created_by).unwrap_or(0),
+            created_at_unix: u64::try_from(row.created_at_unix).unwrap_or(0),
+            expires_at_unix: row.expires_at_unix.map(|v| u64::try_from(v).unwrap_or(0)),
+            revoked_at_unix: row.revoked_at_unix.map(|v| u64::try_from(v).unwrap_or(0)),
+            last_used_at_unix: row.last_used_at_unix.map(|v| u64::try_from(v).unwrap_or(0)),
+        })
+        .collect();
+
+    Ok(Json(ServiceTokenListResponse { tokens }))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/admin/service-tokens/{token_id}",
+    responses(
+        (status = 204, description = "Service token revoked"),
+        (status = 403, description = "Requires tokens:manage", body = ErrorResponse),
+        (status = 404, description = "Token not found or already revoked", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_revoke_service_token_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(token_id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    require_permission(&auth, "tokens:manage")?;
+
+    let revoked = state.service_tokens.revoke(token_id).await?;
+
+    if !revoked {
+        return Err(ApiError::not_found(
+            "Service token not found or already revoked",
+            "SERVICE_TOKEN_NOT_FOUND",
+        ));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }

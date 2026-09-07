@@ -62,6 +62,7 @@ ports:
 | `WOW_MYSQL_PASSWORD` | **obrigatório** | Senha root MySQL |
 | `WOW_MYSQL_USER` | `root` | Usuário MySQL da API |
 | `WOW_API_PORT` | `3000` | Porta da API |
+| `WOW_METRICS_PORT` | `9090` | Porta do servidor de métricas Prometheus (interno, não publicado pelo compose) |
 | `WOW_RUST_LOG` | `info` | Nível de log da API |
 | `WOW_SRP6_CORE5_MODE` | `false` | Formato do verifier SRP6. `false` = AzerothCore master (padrão); `true` = formato "core 5" de outros cores. Ver [SRP6](#srp6-e-criacao-de-contas) |
 | `WOW_JWT_ISSUER` | `wow-backend` | Emissor JWT |
@@ -121,3 +122,4 @@ container do backend e recrie a conta. Detalhes em
 | 3306/tcp | MySQL | `127.0.0.1` | Não |
 | 5432/tcp | PostgreSQL | `127.0.0.1` | Não |
 | 3000/tcp | API | `127.0.0.1` | Não (padrão) |
+| 9090/tcp | Métricas Prometheus | interno | Não (só rede Docker; sem `ports:` no compose) |

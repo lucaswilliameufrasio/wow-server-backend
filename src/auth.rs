@@ -171,6 +171,7 @@ pub fn build_rbac_policy(gm_level: u8) -> RbacPolicy {
     if gm_level >= 3 {
         roles.push("admin".to_string());
         permissions.insert("players:write".to_string());
+        permissions.insert("tokens:manage".to_string());
     }
 
     RbacPolicy {

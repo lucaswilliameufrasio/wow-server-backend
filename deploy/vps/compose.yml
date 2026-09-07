@@ -40,6 +40,8 @@ services:
       JWT_REFRESH_EXPIRES_DAYS: ${WOW_JWT_REFRESH_EXPIRES_DAYS:-30}
       SRP6_CORE5_MODE: ${WOW_SRP6_CORE5_MODE:-false}
       PORT: ${WOW_API_PORT:-3000}
+      METRICS_PORT: ${WOW_METRICS_PORT:-9090}
+      METRICS_BIND: 0.0.0.0
       RUST_LOG: ${WOW_RUST_LOG:-info}
     secrets:
       - source: jwt_private
