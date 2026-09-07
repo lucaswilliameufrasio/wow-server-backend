@@ -1,3 +1,7 @@
+[workspace]
+resolver = "2"
+members = [".", "mcp"]
+
 [package]
 name = "rust-http-service"
 version = "0.1.0"

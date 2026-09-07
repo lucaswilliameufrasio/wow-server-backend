@@ -30,12 +30,12 @@ Regras:
 
 ## Autenticação
 
-- Credencial de **service account** dedicada (usuário GM level 3 criado via
-  `./wowctl create-account <mcp-service> <senha> 3`), nunca login interativo de pessoa.
-- O MCP autentica na API via `POST /v1/auth/sign-in`, guarda o access token em memória
-  e renova com o refresh token. Nenhum token persiste em disco.
-- Config via env/secret file: `MCP_API_BASE_URL`, `MCP_SERVICE_USERNAME`,
-  `MCP_SERVICE_PASSWORD`.
+- v1: bearer token via `MCP_API_TOKEN` (access token de conta com `players:read`/`items:read`).
+  O MCP envia `Authorization: Bearer` em todos os requests; nenhum token persiste em disco.
+- Próximo passo (passo 4 do plano): service tokens de longa duração e revogáveis na API,
+  eliminando o token de 15 min de uma conta humana.
+- Config via env/secret file: `MCP_API_BASE_URL`, `MCP_API_TOKEN`,
+  `MCP_REQUEST_TIMEOUT_SECS`.
 - Transporte **stdio** (uso local via SSH tunnel/Tailscale, mesmo perfil privado da API).
   Streamable HTTP só se houver necessidade de acesso remoto multiusuário.
 
@@ -113,29 +113,28 @@ orquestrado pela API — nunca o MCP falando SOAP/banco direto):
 - Timeout da API (30s) e indisponibilidade viram erros explícitos, nunca retry cego
   em mutações.
 
-## Estrutura proposta
+## Estrutura (implementada)
 
 ```text
+Cargo.toml              # workspace: raiz (API) + mcp/
 mcp/
-  Cargo.toml            # binário separado, mesmo workspace ou crate isolado
+  Cargo.toml            # crate wow-mcp (rmcp 3.2, reqwest, stdio)
   src/
-    main.rs             # bootstrap stdio + config
-    api_client.rs       # HTTP client da API existente (única fronteira)
-    auth.rs             # sign-in + renovação de token em memória
-    tools/
-      players.rs        # list/search/locations/lock
-      items.rs          # search/get
-      server.rs         # health/metrics
-    resources.rs
+    main.rs             # bootstrap stdio + tracing em stderr
+    config.rs           # MCP_API_BASE_URL / MCP_API_TOKEN / MCP_REQUEST_TIMEOUT_SECS
+    api_client.rs       # HTTP client da API (única fronteira)
+    dto.rs              # DTOs sem email/last_ip (redação de PII na fronteira)
+    wow_mcp.rs          # #[tool_router] + ServerHandler (tools e resources)
+    mock.rs             # mock server Axum para testes
   README.md
 ```
 
 ## Plano incremental
 
 1. **Feito** — sanitizar histórico (caminhos locais), gitleaks no CI.
-2. Spec (este documento) + decorar OpenAPI completo do backend (hoje o Swagger só
-   documenta parte das rotas).
-3. MCP v1 read-only consumindo a API atual — já é útil imediatamente.
+2. **Feito** — spec (este documento).
+3. **Feito** — MCP v1 read-only (crate `wow-mcp`, SDK rmcp 3.2, transporte stdio):
+   7 tools, 3 resources + template `item://{entry}`, redação de PII, testes com mock.
 4. Service token + proteção de `/metrics`.
 5. Audit log + `lock_account` com `dry_run`/confirmação.
 6. Integração WorldServer (módulo do core ou SOAP) → status/kick/ban/anúncio/restart.
