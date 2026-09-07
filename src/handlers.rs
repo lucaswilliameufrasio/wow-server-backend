@@ -41,6 +41,10 @@ use serde_json::json;
         admin_ban_account_handler,
         admin_unban_account_handler,
         admin_gm_command_handler,
+        admin_teleport_player_handler,
+        admin_give_item_handler,
+        admin_modify_money_handler,
+        admin_set_level_handler,
     ),
     components(
         schemas(
@@ -67,6 +71,10 @@ use serde_json::json;
             UnbanAccountRequest,
             GmCommandRequest,
             SoapCommandResponse,
+            TeleportPlayerRequest,
+            GiveItemRequest,
+            ModifyMoneyRequest,
+            SetLevelRequest,
         )
     ),
     tags(
@@ -149,7 +157,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/admin/accounts/unban",
             post(admin_unban_account_handler),
-        );
+        )
+        .route(
+            "/v1/admin/players/teleport",
+            post(admin_teleport_player_handler),
+        )
+        .route("/v1/admin/players/items", post(admin_give_item_handler))
+        .route("/v1/admin/players/money", post(admin_modify_money_handler))
+        .route("/v1/admin/players/level", post(admin_set_level_handler));
 
     let public = if debug_enabled {
         public.route("/debug/diagnostics", get(diagnostics_handler))
@@ -917,6 +932,30 @@ fn validate_character_name(name: &str) -> Result<String, ApiError> {
     Ok(name.to_string())
 }
 
+fn validate_location_name(location: &str) -> Result<String, ApiError> {
+    let location = location.trim();
+    let valid = !location.is_empty()
+        && location.len() <= 100
+        && location
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-' || c == '\'' || c == '_');
+    if !valid {
+        return Err(ApiError::bad_request(
+            "Invalid teleport location",
+            "INVALID_LOCATION",
+        ));
+    }
+    Ok(location.to_string())
+}
+
+fn money_format(copper: i64) -> String {
+    let gold = copper.abs() / 10_000;
+    let silver = (copper.abs() % 10_000) / 100;
+    let rest = copper.abs() % 100;
+    let sign = if copper < 0 { "-" } else { "" };
+    format!("{sign}{gold}g{silver}s{rest}c")
+}
+
 fn validate_account_name(name: &str) -> Result<String, ApiError> {
     let name = name.trim();
     if name.is_empty() || name.len() > 32 || !name.chars().all(|c| c.is_ascii_alphanumeric()) {
@@ -926,6 +965,216 @@ fn validate_account_name(name: &str) -> Result<String, ApiError> {
         ));
     }
     Ok(name.to_string())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/players/teleport",
+    request_body = TeleportPlayerRequest,
+    responses(
+        (status = 200, description = "Player teleported", body = SoapCommandResponse),
+        (status = 400, description = "Invalid character or location", body = ErrorResponse),
+        (status = 403, description = "Requires players:modify", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_teleport_player_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<TeleportPlayerRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    let character = validate_character_name(&body.character_name)?;
+    let location = validate_location_name(&body.location)?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "players:modify",
+        "player.teleport",
+        "character",
+        Some(&character),
+    )
+    .await?;
+
+    let soap = soap_or_503(&state)?;
+    let command = format!("tele name {character} {location}");
+    let result = soap.execute(&command).await?;
+
+    write_audit(
+        &state,
+        &auth,
+        "player.teleport",
+        "character",
+        Some(&character),
+        json!({ "location": location }),
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/players/items",
+    request_body = GiveItemRequest,
+    responses(
+        (status = 200, description = "Item given", body = SoapCommandResponse),
+        (status = 400, description = "Invalid character, item or count", body = ErrorResponse),
+        (status = 403, description = "Requires players:modify", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_give_item_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<GiveItemRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    let character = validate_character_name(&body.character_name)?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "players:modify",
+        "player.give_item",
+        "character",
+        Some(&character),
+    )
+    .await?;
+
+    let count = body.count.unwrap_or(1);
+    if body.item_entry == 0 || body.item_entry > 99_999_999 || count == 0 || count > 1_000 {
+        return Err(ApiError::bad_request(
+            "item_entry must be 1-99999999 and count 1-1000",
+            "INVALID_ITEM_REQUEST",
+        ));
+    }
+
+    let soap = soap_or_503(&state)?;
+    let command = format!("additem name {character} {} {count}", body.item_entry);
+    let result = soap.execute(&command).await?;
+
+    write_audit(
+        &state,
+        &auth,
+        "player.give_item",
+        "character",
+        Some(&character),
+        json!({ "item_entry": body.item_entry, "count": count }),
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/players/money",
+    request_body = ModifyMoneyRequest,
+    responses(
+        (status = 200, description = "Money modified", body = SoapCommandResponse),
+        (status = 400, description = "Invalid character or amount", body = ErrorResponse),
+        (status = 403, description = "Requires players:modify", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_modify_money_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ModifyMoneyRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    let character = validate_character_name(&body.character_name)?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "players:modify",
+        "player.modify_money",
+        "character",
+        Some(&character),
+    )
+    .await?;
+
+    if body.amount == 0 || body.amount.abs() > 2_147_483_647 {
+        return Err(ApiError::bad_request(
+            "amount must be between -2147483647 and 2147483647 (non-zero copper)",
+            "INVALID_MONEY_AMOUNT",
+        ));
+    }
+
+    let soap = soap_or_503(&state)?;
+    let command = format!(
+        "modify money name {character} {}",
+        money_format(body.amount)
+    );
+    let result = soap.execute(&command).await?;
+
+    write_audit(
+        &state,
+        &auth,
+        "player.modify_money",
+        "character",
+        Some(&character),
+        json!({ "amount_copper": body.amount }),
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/players/level",
+    request_body = SetLevelRequest,
+    responses(
+        (status = 200, description = "Level set", body = SoapCommandResponse),
+        (status = 400, description = "Invalid character or level", body = ErrorResponse),
+        (status = 403, description = "Requires players:modify", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_set_level_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<SetLevelRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    let character = validate_character_name(&body.character_name)?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "players:modify",
+        "player.set_level",
+        "character",
+        Some(&character),
+    )
+    .await?;
+
+    if body.level == 0 || body.level > 80 {
+        return Err(ApiError::bad_request(
+            "level must be between 1 and 80",
+            "INVALID_LEVEL",
+        ));
+    }
+
+    let soap = soap_or_503(&state)?;
+    let command = format!("setlevel name {character} {}", body.level);
+    let result = soap.execute(&command).await?;
+
+    write_audit(
+        &state,
+        &auth,
+        "player.set_level",
+        "character",
+        Some(&character),
+        json!({ "level": body.level }),
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
 }
 
 #[utoipa::path(

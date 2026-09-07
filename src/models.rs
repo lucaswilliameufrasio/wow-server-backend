@@ -316,6 +316,31 @@ pub struct GmCommandRequest {
     pub command: String,
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct TeleportPlayerRequest {
+    pub character_name: String,
+    pub location: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct GiveItemRequest {
+    pub character_name: String,
+    pub item_entry: u32,
+    pub count: Option<u32>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ModifyMoneyRequest {
+    pub character_name: String,
+    pub amount: i64,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct SetLevelRequest {
+    pub character_name: String,
+    pub level: u8,
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct SoapCommandResponse {
     pub command: String,

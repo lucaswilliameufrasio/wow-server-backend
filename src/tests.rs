@@ -3263,3 +3263,173 @@ async fn gm_command_enforces_allowlist_when_configured() {
     let commands = shared.lock().unwrap();
     assert_eq!(commands.len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// Player modify endpoints (SOAP)
+// ---------------------------------------------------------------------------
+
+fn admin_test_app() -> (axum::Router, Arc<Mutex<Vec<String>>>, String) {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+    let soap = MockSoapClient::new();
+    let shared = soap.shared();
+    let state = test_state_full(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+        MockAuditRepo::new(),
+        Some(Arc::new(soap)),
+        false,
+        None,
+    );
+    let jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    (build_router(state), shared, jwt)
+}
+
+async fn post_admin(
+    app: &axum::Router,
+    jwt: &str,
+    path: &str,
+    payload: String,
+) -> axum::response::Response {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(AUTHORIZATION, format!("Bearer {jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response")
+}
+
+#[tokio::test]
+async fn teleport_give_money_level_send_commands() {
+    let (app, shared, jwt) = admin_test_app();
+
+    let response = post_admin(
+        &app,
+        &jwt,
+        "/v1/admin/players/teleport",
+        json!({ "character_name": "Xerath", "location": "Stormwind City" }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = post_admin(
+        &app,
+        &jwt,
+        "/v1/admin/players/items",
+        json!({ "character_name": "Xerath", "item_entry": 19019, "count": 2 }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = post_admin(
+        &app,
+        &jwt,
+        "/v1/admin/players/money",
+        json!({ "character_name": "Xerath", "amount": 123456789 }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = post_admin(
+        &app,
+        &jwt,
+        "/v1/admin/players/level",
+        json!({ "character_name": "Xerath", "level": 80 }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let commands = shared.lock().unwrap().clone();
+    assert!(commands.contains(&"tele name Xerath Stormwind City".to_string()));
+    assert!(commands.contains(&"additem name Xerath 19019 2".to_string()));
+    assert!(commands.contains(&"modify money name Xerath 12345g67s89c".to_string()));
+    assert!(commands.contains(&"setlevel name Xerath 80".to_string()));
+}
+
+#[tokio::test]
+async fn player_modify_validations() {
+    let (app, _shared, jwt) = admin_test_app();
+
+    let response = post_admin(
+        &app,
+        &jwt,
+        "/v1/admin/players/teleport",
+        json!({ "character_name": "Xerath", "location": "Evil <script>" }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = post_admin(
+        &app,
+        &jwt,
+        "/v1/admin/players/items",
+        json!({ "character_name": "Xerath", "item_entry": 19019, "count": 5000 }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = post_admin(
+        &app,
+        &jwt,
+        "/v1/admin/players/money",
+        json!({ "character_name": "Xerath", "amount": 0 }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = post_admin(
+        &app,
+        &jwt,
+        "/v1/admin/players/level",
+        json!({ "character_name": "Xerath", "level": 81 }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn player_modify_requires_admin() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 2,
+        username: "PLAYER2".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(2, 0);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let jwt = issue_test_token(&state.jwt, 2, "PLAYER2", 0);
+    let app = build_router(state);
+
+    let response = post_admin(
+        &app,
+        &jwt,
+        "/v1/admin/players/items",
+        json!({ "character_name": "Xerath", "item_entry": 19019 }).to_string(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}

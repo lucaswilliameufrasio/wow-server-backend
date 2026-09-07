@@ -178,6 +178,7 @@ pub fn build_rbac_policy(gm_level: u8) -> RbacPolicy {
         permissions.insert("players:ban".to_string());
         permissions.insert("server:control".to_string());
         permissions.insert("server:gm_command".to_string());
+        permissions.insert("players:modify".to_string());
     }
 
     RbacPolicy {
