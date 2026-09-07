@@ -6,6 +6,7 @@ mod middleware;
 mod models;
 mod observability;
 mod repos;
+mod soap;
 
 use std::{env, fs, net::SocketAddr, sync::Arc};
 
@@ -18,11 +19,12 @@ use tracing_subscriber::EnvFilter;
 use crate::error::AppResult;
 use crate::handlers::{build_metrics_router, build_router};
 use error::AppError;
-use models::{AppConfig, JwtConfig};
+use models::{AppConfig, JwtConfig, SoapConfig};
 use repos::{
     AppState, LiveAccountRepo, LiveAuditRepo, LiveCharacterRepo, LiveItemRepo,
     LiveRefreshTokenRepo, LiveServiceTokenRepo,
 };
+use soap::LiveAcoreSoapClient;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -58,6 +60,9 @@ async fn build_state() -> AppResult<AppState> {
         srp6_core5_mode: parse_bool_env("SRP6_CORE5_MODE"),
         rate_limit: parse_bool_env_with_default("WOW_RATE_LIMIT", true),
         debug_enabled: parse_bool_env_with_default("WOW_DEBUG_ENABLED", false),
+        soap: build_soap_config(),
+        gm_command_enabled: parse_bool_env_with_default("WOW_ENABLE_GM_COMMANDS", false),
+        gm_command_allowlist: build_gm_command_allowlist(),
     };
 
     // Validate DB names to prevent SQL identifier injection via config.
@@ -71,6 +76,20 @@ async fn build_state() -> AppResult<AppState> {
 
     let jwt = build_jwt_config()?;
     run_app_migrations(&app_pool).await?;
+
+    let soap = config.soap.as_ref().and_then(|cfg| {
+        match LiveAcoreSoapClient::new(cfg.base_url.clone(), cfg.user.clone(), cfg.password.clone())
+        {
+            Ok(client) => {
+                let client: Arc<dyn crate::soap::SoapClient> = Arc::new(client);
+                Some(client)
+            }
+            Err(err) => {
+                tracing::warn!(error = ?err, "SOAP client disabled: invalid configuration");
+                None
+            }
+        }
+    });
 
     Ok(AppState {
         config: config.clone(),
@@ -93,6 +112,7 @@ async fn build_state() -> AppResult<AppState> {
         )),
         service_tokens: Arc::new(LiveServiceTokenRepo::new(app_pool.clone())),
         audit: Arc::new(LiveAuditRepo::new(app_pool)),
+        soap,
     })
 }
 
@@ -166,6 +186,40 @@ fn parse_bool_env(key: &str) -> bool {
     env::var(key)
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false)
+}
+
+fn build_soap_config() -> Option<SoapConfig> {
+    let password = env::var("AZEROTH_CORE_SOAP_PASSWORD")
+        .map(|v| v.trim().to_string())
+        .unwrap_or_default();
+    if password.is_empty() {
+        return None;
+    }
+
+    let host = env::var("AZEROTH_CORE_SOAP_HOST").unwrap_or_else(|_| "ac-worldserver".to_string());
+    let port = env::var("AZEROTH_CORE_SOAP_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(7878);
+    let user = env::var("AZEROTH_CORE_SOAP_USER").unwrap_or_else(|_| "wowctl".to_string());
+
+    Some(SoapConfig {
+        base_url: format!("http://{host}:{port}/"),
+        user,
+        password,
+    })
+}
+
+fn build_gm_command_allowlist() -> Option<Vec<String>> {
+    env::var("WOW_GM_COMMAND_ALLOWLIST")
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<String>>()
+        })
+        .filter(|v| !v.is_empty())
 }
 
 fn is_safe_identifier(s: &str) -> bool {

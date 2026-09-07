@@ -21,6 +21,7 @@ use crate::error::*;
 use crate::handlers::*;
 use crate::models::*;
 use crate::repos::*;
+use crate::soap::SoapClient;
 
 // ---------------------------------------------------------------------------
 // Mock AccountRepo
@@ -569,6 +570,29 @@ fn test_state_with_audit(
     refresh_tokens: MockRefreshTokenRepo,
     audit: MockAuditRepo,
 ) -> AppState {
+    test_state_full(
+        accounts,
+        characters,
+        items,
+        refresh_tokens,
+        audit,
+        Some(Arc::new(MockSoapClient::new())),
+        false,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn test_state_full(
+    accounts: MockAccountRepo,
+    characters: MockCharacterRepo,
+    items: MockItemRepo,
+    refresh_tokens: MockRefreshTokenRepo,
+    audit: MockAuditRepo,
+    soap: Option<Arc<dyn SoapClient>>,
+    gm_command_enabled: bool,
+    gm_command_allowlist: Option<Vec<String>>,
+) -> AppState {
     AppState {
         config: AppConfig {
             auth_db: "acore_auth".to_string(),
@@ -577,6 +601,9 @@ fn test_state_with_audit(
             srp6_core5_mode: false,
             rate_limit: false,
             debug_enabled: false,
+            soap: None,
+            gm_command_enabled,
+            gm_command_allowlist,
         },
         jwt: test_jwt_config(),
         accounts: std::sync::Arc::new(accounts),
@@ -585,6 +612,7 @@ fn test_state_with_audit(
         refresh_tokens: std::sync::Arc::new(refresh_tokens),
         service_tokens: std::sync::Arc::new(MockServiceTokenRepo::new()),
         audit: std::sync::Arc::new(audit),
+        soap,
         started_at: 0,
     }
 }
@@ -2087,6 +2115,9 @@ async fn integration_refresh_token_store_find_revoke() {
             srp6_core5_mode: false,
             rate_limit: false,
             debug_enabled: false,
+            soap: None,
+            gm_command_enabled: false,
+            gm_command_allowlist: None,
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),
@@ -2099,6 +2130,7 @@ async fn integration_refresh_token_store_find_revoke() {
         )),
         service_tokens: Arc::new(MockServiceTokenRepo::new()),
         audit: Arc::new(LiveAuditRepo::new(pool)),
+        soap: None,
         started_at: 0,
     };
 
@@ -2186,6 +2218,9 @@ async fn integration_access_token_revocation_roundtrip() {
             srp6_core5_mode: false,
             rate_limit: false,
             debug_enabled: false,
+            soap: None,
+            gm_command_enabled: false,
+            gm_command_allowlist: None,
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),
@@ -2198,6 +2233,7 @@ async fn integration_access_token_revocation_roundtrip() {
         )),
         service_tokens: Arc::new(MockServiceTokenRepo::new()),
         audit: Arc::new(LiveAuditRepo::new(pool)),
+        soap: None,
         started_at: 0,
     };
 
@@ -2838,4 +2874,392 @@ async fn integration_audit_repo_roundtrip() {
     let filtered = repo.list(10, Some(all[0].id)).await.expect("list cursor");
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].action, "account.lock");
+}
+
+// ---------------------------------------------------------------------------
+// Mock SoapClient
+// ---------------------------------------------------------------------------
+
+struct MockSoapClient {
+    commands: Arc<Mutex<Vec<String>>>,
+    result: String,
+}
+
+impl MockSoapClient {
+    fn new() -> Self {
+        Self {
+            commands: Arc::new(Mutex::new(Vec::new())),
+            result: "OK".to_string(),
+        }
+    }
+
+    fn shared(&self) -> Arc<Mutex<Vec<String>>> {
+        self.commands.clone()
+    }
+}
+
+#[async_trait]
+impl SoapClient for MockSoapClient {
+    async fn execute(&self, command: &str) -> Result<String, ApiError> {
+        self.commands.lock().unwrap().push(command.to_string());
+        Ok(self.result.clone())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WorldServer SOAP endpoint tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn server_status_requires_permission() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 2,
+        username: "PLAYER2".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(2, 0);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let jwt = issue_test_token(&state.jwt, 2, "PLAYER2", 0);
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/server/status")
+                .header(AUTHORIZATION, format!("Bearer {jwt}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn server_status_sends_info_command() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 1);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let jwt = issue_test_token(&state.jwt, 1, "MOD", 1);
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/server/status")
+                .header(AUTHORIZATION, format!("Bearer {jwt}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["command"], "server info");
+}
+
+#[tokio::test]
+async fn announce_success_and_denial_are_audited() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let admin_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    let player_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    let _ = player_jwt;
+    let app = build_router(state);
+
+    let payload = json!({ "message": "reinício em 15 minutos" }).to_string();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/server/announce")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["command"], "announce reinício em 15 minutos");
+}
+
+#[tokio::test]
+async fn soap_missing_returns_503() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+    let state = test_state_full(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+        MockAuditRepo::new(),
+        None,
+        false,
+        None,
+    );
+    let admin_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    let app = build_router(state);
+    let payload = json!({ "message": "hi" }).to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/server/announce")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = body_json(response).await;
+    assert_eq!(body["error_code"], "SOAP_NOT_CONFIGURED");
+}
+
+#[tokio::test]
+async fn kick_validates_character_name() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let admin_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    let app = build_router(state);
+    let payload = json!({ "character_name": "bad_name!" }).to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/players/kick")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = body_json(response).await;
+    assert_eq!(body["error_code"], "INVALID_CHARACTER_NAME");
+}
+
+#[tokio::test]
+async fn ban_sends_ban_command() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+    let soap = MockSoapClient::new();
+    let shared = soap.shared();
+    let state = test_state_full(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+        MockAuditRepo::new(),
+        Some(Arc::new(soap)),
+        false,
+        None,
+    );
+    let admin_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    let app = build_router(state);
+    let payload = json!({ "account": "Cheater", "days": 7, "reason": "exploits" }).to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/accounts/ban")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let commands = shared.lock().unwrap();
+    assert_eq!(
+        commands.last().map(String::as_str),
+        Some("ban account Cheater 7d exploits")
+    );
+}
+
+#[tokio::test]
+async fn gm_command_disabled_by_default() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let admin_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    let app = build_router(state);
+    let payload = json!({ "command": "server info" }).to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/server/command")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = body_json(response).await;
+    assert_eq!(body["error_code"], "GM_COMMAND_DISABLED");
+}
+
+#[tokio::test]
+async fn gm_command_enforces_allowlist_when_configured() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+    let soap = MockSoapClient::new();
+    let shared = soap.shared();
+    let state = test_state_full(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+        MockAuditRepo::new(),
+        Some(Arc::new(soap)),
+        true,
+        Some(vec!["server info".to_string()]),
+    );
+    let admin_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    let app = build_router(state);
+
+    let payload = json!({ "command": "server info" }).to_string();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/server/command")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let payload = json!({ "command": "kick Uther" }).to_string();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/admin/server/command")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = body_json(response).await;
+    assert_eq!(body["error_code"], "COMMAND_NOT_ALLOWED");
+
+    let commands = shared.lock().unwrap();
+    assert_eq!(commands.len(), 1);
 }

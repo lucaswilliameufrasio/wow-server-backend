@@ -42,6 +42,11 @@ services:
       PORT: ${WOW_API_PORT:-3000}
       METRICS_PORT: ${WOW_METRICS_PORT:-9090}
       METRICS_BIND: 0.0.0.0
+      AZEROTH_CORE_SOAP_HOST: ac-worldserver
+      AZEROTH_CORE_SOAP_PORT: ${WOW_SOAP_PORT:-7878}
+      AZEROTH_CORE_SOAP_USER: ${WOW_SOAP_USER:-wowctl}
+      AZEROTH_CORE_SOAP_PASSWORD: ${WOW_SOAP_PASSWORD:-}
+      WOW_ENABLE_GM_COMMANDS: ${WOW_ENABLE_GM_COMMANDS:-false}
       RUST_LOG: ${WOW_RUST_LOG:-info}
     secrets:
       - source: jwt_private

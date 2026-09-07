@@ -152,6 +152,7 @@ pub struct AppState {
     pub refresh_tokens: Arc<dyn RefreshTokenRepo>,
     pub service_tokens: Arc<dyn ServiceTokenRepo>,
     pub audit: Arc<dyn AuditRepo>,
+    pub soap: Option<Arc<dyn crate::soap::SoapClient>>,
     pub started_at: u64,
 }
 

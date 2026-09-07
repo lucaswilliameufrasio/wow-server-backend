@@ -166,6 +166,7 @@ pub fn build_rbac_policy(gm_level: u8) -> RbacPolicy {
         permissions.insert("players:read".to_string());
         permissions.insert("characters:read:any".to_string());
         permissions.insert("characters:location:any".to_string());
+        permissions.insert("server:read".to_string());
     }
 
     if gm_level >= 3 {
@@ -173,6 +174,10 @@ pub fn build_rbac_policy(gm_level: u8) -> RbacPolicy {
         permissions.insert("players:write".to_string());
         permissions.insert("tokens:manage".to_string());
         permissions.insert("audit:read".to_string());
+        permissions.insert("players:kick".to_string());
+        permissions.insert("players:ban".to_string());
+        permissions.insert("server:control".to_string());
+        permissions.insert("server:gm_command".to_string());
     }
 
     RbacPolicy {

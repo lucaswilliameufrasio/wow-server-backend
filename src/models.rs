@@ -9,6 +9,16 @@ pub struct AppConfig {
     pub srp6_core5_mode: bool,
     pub rate_limit: bool,
     pub debug_enabled: bool,
+    pub soap: Option<SoapConfig>,
+    pub gm_command_enabled: bool,
+    pub gm_command_allowlist: Option<Vec<String>>,
+}
+
+#[derive(Clone)]
+pub struct SoapConfig {
+    pub base_url: String,
+    pub user: String,
+    pub password: String,
 }
 
 #[derive(Clone)]
@@ -271,6 +281,45 @@ pub struct AuditLogListResponse {
     pub limit: u32,
     pub cursor: Option<i64>,
     pub entries: Vec<AuditLogEntry>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct AnnounceRequest {
+    pub message: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct RestartServerRequest {
+    pub delay_seconds: Option<u32>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct KickPlayerRequest {
+    pub character_name: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct BanAccountRequest {
+    pub account: String,
+    pub days: u32,
+    pub reason: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct UnbanAccountRequest {
+    pub account: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct GmCommandRequest {
+    pub command: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SoapCommandResponse {
+    pub command: String,
+    pub result: String,
 }
 
 #[derive(Deserialize)]

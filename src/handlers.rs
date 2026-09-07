@@ -34,6 +34,13 @@ use serde_json::json;
         admin_list_service_tokens_handler,
         admin_revoke_service_token_handler,
         admin_audit_log_handler,
+        admin_server_status_handler,
+        admin_announce_handler,
+        admin_server_restart_handler,
+        admin_kick_player_handler,
+        admin_ban_account_handler,
+        admin_unban_account_handler,
+        admin_gm_command_handler,
     ),
     components(
         schemas(
@@ -53,6 +60,13 @@ use serde_json::json;
             AuditLogQuery,
             AuditLogEntry,
             AuditLogListResponse,
+            AnnounceRequest,
+            RestartServerRequest,
+            KickPlayerRequest,
+            BanAccountRequest,
+            UnbanAccountRequest,
+            GmCommandRequest,
+            SoapCommandResponse,
         )
     ),
     tags(
@@ -122,7 +136,20 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/admin/service-tokens/{token_id}",
             delete(admin_revoke_service_token_handler),
         )
-        .route("/v1/admin/audit-log", get(admin_audit_log_handler));
+        .route("/v1/admin/audit-log", get(admin_audit_log_handler))
+        .route("/v1/admin/server/status", post(admin_server_status_handler))
+        .route("/v1/admin/server/announce", post(admin_announce_handler))
+        .route(
+            "/v1/admin/server/restart",
+            post(admin_server_restart_handler),
+        )
+        .route("/v1/admin/server/command", post(admin_gm_command_handler))
+        .route("/v1/admin/players/kick", post(admin_kick_player_handler))
+        .route("/v1/admin/accounts/ban", post(admin_ban_account_handler))
+        .route(
+            "/v1/admin/accounts/unban",
+            post(admin_unban_account_handler),
+        );
 
     let public = if debug_enabled {
         public.route("/debug/diagnostics", get(diagnostics_handler))
@@ -856,6 +883,402 @@ async fn admin_list_service_tokens_handler(
         .collect();
 
     Ok(Json(ServiceTokenListResponse { tokens }))
+}
+
+fn soap_or_503(state: &AppState) -> Result<Arc<dyn crate::soap::SoapClient>, ApiError> {
+    state.soap.clone().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "WorldServer SOAP is not configured",
+            "SOAP_NOT_CONFIGURED",
+        )
+    })
+}
+
+fn sanitize_one_line(value: &str, max: usize) -> Result<String, ApiError> {
+    let cleaned: String = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cleaned.is_empty() {
+        return Err(ApiError::bad_request("Text cannot be empty", "EMPTY_TEXT"));
+    }
+    if cleaned.chars().count() > max {
+        return Err(ApiError::bad_request("Text is too long", "TEXT_TOO_LONG"));
+    }
+    Ok(cleaned)
+}
+
+fn validate_character_name(name: &str) -> Result<String, ApiError> {
+    let name = name.trim();
+    if name.len() < 2 || name.len() > 12 || !name.chars().all(|c| c.is_ascii_alphabetic()) {
+        return Err(ApiError::bad_request(
+            "Invalid character name",
+            "INVALID_CHARACTER_NAME",
+        ));
+    }
+    Ok(name.to_string())
+}
+
+fn validate_account_name(name: &str) -> Result<String, ApiError> {
+    let name = name.trim();
+    if name.is_empty() || name.len() > 32 || !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(ApiError::bad_request(
+            "Invalid account name",
+            "INVALID_ACCOUNT_NAME",
+        ));
+    }
+    Ok(name.to_string())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/server/status",
+    responses(
+        (status = 200, description = "WorldServer status", body = SoapCommandResponse),
+        (status = 403, description = "Requires server:read", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_server_status_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    require_permission(&auth, "server:read")?;
+
+    let soap = soap_or_503(&state)?;
+    let result = soap.execute("server info").await?;
+
+    Ok(Json(SoapCommandResponse {
+        command: "server info".to_string(),
+        result,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/server/announce",
+    request_body = AnnounceRequest,
+    responses(
+        (status = 200, description = "Announcement sent", body = SoapCommandResponse),
+        (status = 400, description = "Invalid message", body = ErrorResponse),
+        (status = 403, description = "Requires server:control", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_announce_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AnnounceRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "server:control",
+        "server.announce",
+        "server",
+        None,
+    )
+    .await?;
+
+    let message = sanitize_one_line(&body.message, 256)?;
+    let soap = soap_or_503(&state)?;
+    let command = format!("announce {message}");
+    let result = soap.execute(&command).await?;
+
+    write_audit(
+        &state,
+        &auth,
+        "server.announce",
+        "server",
+        None,
+        json!({ "message": message }),
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/server/restart",
+    request_body = RestartServerRequest,
+    responses(
+        (status = 200, description = "Restart scheduled", body = SoapCommandResponse),
+        (status = 400, description = "Invalid delay", body = ErrorResponse),
+        (status = 403, description = "Requires server:control", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_server_restart_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<RestartServerRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "server:control",
+        "server.restart",
+        "server",
+        None,
+    )
+    .await?;
+
+    let delay = body.delay_seconds.unwrap_or(60);
+    if delay == 0 || delay > 86_400 {
+        return Err(ApiError::bad_request(
+            "delay_seconds must be between 1 and 86400",
+            "INVALID_RESTART_DELAY",
+        ));
+    }
+
+    let soap = soap_or_503(&state)?;
+    let command = format!("server restart {delay}");
+    let result = soap.execute(&command).await?;
+
+    write_audit(
+        &state,
+        &auth,
+        "server.restart",
+        "server",
+        None,
+        json!({ "delay_seconds": delay }),
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/players/kick",
+    request_body = KickPlayerRequest,
+    responses(
+        (status = 200, description = "Player kicked", body = SoapCommandResponse),
+        (status = 400, description = "Invalid character name", body = ErrorResponse),
+        (status = 403, description = "Requires players:kick", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_kick_player_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<KickPlayerRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    let character = validate_character_name(&body.character_name)?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "players:kick",
+        "player.kick",
+        "character",
+        Some(&character),
+    )
+    .await?;
+
+    let soap = soap_or_503(&state)?;
+    let command = format!("kick {character}");
+    let result = soap.execute(&command).await?;
+
+    let mut details = json!({ "character_name": character });
+    if let Some(reason) = body.reason.as_deref().filter(|r| !r.trim().is_empty()) {
+        details["reason"] = json!(reason);
+    }
+    write_audit(
+        &state,
+        &auth,
+        "player.kick",
+        "character",
+        Some(&character),
+        details,
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/accounts/ban",
+    request_body = BanAccountRequest,
+    responses(
+        (status = 200, description = "Account banned", body = SoapCommandResponse),
+        (status = 400, description = "Invalid account or days", body = ErrorResponse),
+        (status = 403, description = "Requires players:ban", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_ban_account_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<BanAccountRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    let account = validate_account_name(&body.account)?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "players:ban",
+        "account.ban",
+        "account",
+        Some(&account),
+    )
+    .await?;
+
+    if body.days == 0 || body.days > 3650 {
+        return Err(ApiError::bad_request(
+            "days must be between 1 and 3650",
+            "INVALID_BAN_DAYS",
+        ));
+    }
+
+    let reason = body
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .unwrap_or("banned via API");
+
+    let soap = soap_or_503(&state)?;
+    let command = format!("ban account {account} {}d {reason}", body.days);
+    let result = soap.execute(&command).await?;
+
+    write_audit(
+        &state,
+        &auth,
+        "account.ban",
+        "account",
+        Some(&account),
+        json!({ "days": body.days, "reason": reason }),
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/accounts/unban",
+    request_body = UnbanAccountRequest,
+    responses(
+        (status = 200, description = "Account unbanned", body = SoapCommandResponse),
+        (status = 400, description = "Invalid account", body = ErrorResponse),
+        (status = 403, description = "Requires players:ban", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_unban_account_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<UnbanAccountRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    let account = validate_account_name(&body.account)?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "players:ban",
+        "account.unban",
+        "account",
+        Some(&account),
+    )
+    .await?;
+
+    let soap = soap_or_503(&state)?;
+    let command = format!("unban account {account}");
+    let result = soap.execute(&command).await?;
+
+    write_audit(
+        &state,
+        &auth,
+        "account.unban",
+        "account",
+        Some(&account),
+        json!({}),
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/admin/server/command",
+    request_body = GmCommandRequest,
+    responses(
+        (status = 200, description = "Command executed", body = SoapCommandResponse),
+        (status = 403, description = "Disabled or requires server:gm_command", body = ErrorResponse),
+        (status = 503, description = "SOAP not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_gm_command_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<GmCommandRequest>,
+) -> Result<Json<SoapCommandResponse>, ApiError> {
+    if !state.config.gm_command_enabled {
+        return Err(ApiError::forbidden(
+            "GM command execution is disabled (set WOW_ENABLE_GM_COMMANDS=true)",
+            "GM_COMMAND_DISABLED",
+        ));
+    }
+
+    let auth = authenticate(&headers, &state).await?;
+    let command = sanitize_one_line(&body.command, 256)?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "server:gm_command",
+        "server.gm_command",
+        "server",
+        None,
+    )
+    .await?;
+
+    if let Some(allowlist) = &state.config.gm_command_allowlist
+        && !allowlist.iter().any(|allowed| {
+            let allowed = allowed.trim();
+            command == *allowed || command.starts_with(&format!("{allowed} "))
+        })
+    {
+        write_audit(
+            &state,
+            &auth,
+            "server.gm_command",
+            "server",
+            None,
+            json!({ "command": command, "denied": true, "reason": "not_in_allowlist" }),
+        )
+        .await;
+        return Err(ApiError::forbidden(
+            "Command is not in the allowlist",
+            "COMMAND_NOT_ALLOWED",
+        ));
+    }
+
+    let soap = soap_or_503(&state)?;
+    let result = soap.execute(&command).await?;
+
+    write_audit(
+        &state,
+        &auth,
+        "server.gm_command",
+        "server",
+        None,
+        json!({ "command": command }),
+    )
+    .await;
+
+    Ok(Json(SoapCommandResponse { command, result }))
 }
 
 #[utoipa::path(
