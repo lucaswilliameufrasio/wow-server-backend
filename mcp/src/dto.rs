@@ -72,3 +72,27 @@ pub struct ItemListResponse {
     pub cursor: Option<u32>,
     pub items: Vec<ItemSummary>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountLockResponse {
+    pub account_id: u64,
+    pub locked: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLogEntry {
+    pub id: i64,
+    pub actor_account_id: u64,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: Option<String>,
+    pub details: Option<serde_json::Value>,
+    pub created_at_unix: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLogListResponse {
+    pub limit: u32,
+    pub cursor: Option<i64>,
+    pub entries: Vec<AuditLogEntry>,
+}

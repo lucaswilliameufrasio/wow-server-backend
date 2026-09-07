@@ -66,14 +66,16 @@ Contexto consultável (não-parametrizado) vira resource; busca parametrizada vi
 
 | Tool | Fonte | Notas |
 |---|---|---|
-| `lock_account(account_id, locked, reason, dry_run?)` | `PATCH /v1/admin/players/{id}/lock` | única mutação da API hoje |
+| `lock_account(account_id, locked, reason, dry_run?)` | `PATCH /v1/admin/players/{id}/lock` | **Feito** — única mutação; `dry_run` default `true`, annotation `destructive`, reason vai para o audit log |
+| `get_audit_log(limit?, cursor?)` | `GET /v1/admin/audit-log` | **Feito** — entradas de mutação e negações, newest first |
 
-Requisitos para toda mutação:
+Requisitos de mutação (implementados):
 
-- `dry_run` default `true` na primeira chamada; confirmação explícita do operador;
-- annotation `destructive` no tool;
-- audit log na API (ator, tool, args redigidos, alvo, resultado, timestamp);
-- idempotência (chamar de novo com mesmo estado não é erro).
+- `dry_run` default `true`; só aplica com `dry_run=false` (confirmação explícita);
+- annotations `destructive_hint = true`, `idempotent_hint = true`;
+- audit log persistente na API (ator, ação, alvo, details, timestamp) — cobre
+  `account.lock`, `service_token.create`, `service_token.revoke` e negações RBAC;
+- leitura do audit log: `GET /v1/admin/audit-log` (permissão `audit:read`).
 
 ## Tools (v3 — requer novas capacidades na API)
 
@@ -94,7 +96,8 @@ orquestrado pela API — nunca o MCP falando SOAP/banco direto):
 
 1. **Feito** — service tokens (`wowst_...`, permissão `tokens:manage`, endpoints
    `GET/POST /v1/admin/service-tokens`, `DELETE /v1/admin/service-tokens/{id}`).
-2. Audit log persistente (PostgreSQL já está disponível para isso).
+2. **Feito** — audit log persistente (`admin_audit_log` em PostgreSQL, migration
+   `20260907000200`, permissão `audit:read`).
 3. RBAC granular além de `players:read`/`players:write` (ex.: `server:restart`,
    `players:kick`, `players:ban`).
 4. **Feito no MCP** — redação de PII na fronteira (DTOs sem `email`/`last_ip`);
@@ -135,7 +138,7 @@ mcp/
 3. **Feito** — MCP v1 read-only (crate `wow-mcp`, SDK rmcp 3.2, transporte stdio):
    7 tools, 3 resources + template `item://{entry}`, redação de PII, testes com mock.
 4. **Feito** — service tokens (`wowst_...`) na API + `/metrics` em porta privada.
-5. Audit log + `lock_account` com `dry_run`/confirmação.
+5. **Feito** — audit log + `lock_account` com `dry_run`/confirmação + `get_audit_log`.
 6. Integração WorldServer (módulo do core ou SOAP) → status/kick/ban/anúncio/restart.
 7. Por último: teleport, give item, dinheiro, level, e `execute_gm_command` atrás de
    allowlist + flag de config explícita.

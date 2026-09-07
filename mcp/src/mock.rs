@@ -1,4 +1,8 @@
-use axum::{Json, Router, http::StatusCode, routing::get};
+use axum::{
+    Json, Router,
+    http::StatusCode,
+    routing::{get, patch},
+};
 use serde_json::json;
 
 pub async fn spawn() -> String {
@@ -108,6 +112,33 @@ pub async fn spawn() -> String {
                         "error_code": "RBAC_FORBIDDEN"
                     })),
                 )
+            }),
+        )
+        .route(
+            "/v1/admin/players/5/lock",
+            patch(|Json(body): Json<serde_json::Value>| async move {
+                Json(json!({
+                    "account_id": 5,
+                    "locked": body.get("locked").and_then(|v| v.as_bool()).unwrap_or(false)
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/audit-log",
+            get(|| async {
+                Json(json!({
+                    "limit": 50,
+                    "cursor": null,
+                    "entries": [{
+                        "id": 2,
+                        "actor_account_id": 1,
+                        "action": "account.lock",
+                        "target_type": "account",
+                        "target_id": "5",
+                        "details": {"locked": true, "actor_username": "ADMIN"},
+                        "created_at_unix": 1700001000
+                    }]
+                }))
             }),
         );
 

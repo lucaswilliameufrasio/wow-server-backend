@@ -17,8 +17,11 @@ Baseado no SDK oficial [rmcp](https://github.com/modelcontextprotocol/rust-sdk) 
 | `get_item` | `GET /v1/items/{entry}` |
 | `get_health` | `GET /health-check` |
 | `get_metrics` | `GET :METRICS_PORT/metrics` (Prometheus) |
+| `get_audit_log` | `GET /v1/admin/audit-log` (requer `audit:read`) |
+| `lock_account` | `PATCH /v1/admin/players/{id}/lock` (requer `players:write`) |
 
-Todas as tools são marcadas com `read_only_hint = true`.
+Todas as tools read-only são marcadas com `read_only_hint = true`; `lock_account` é
+a única mutação, com `destructive_hint = true` e `dry_run` default `true`.
 
 ## Resources
 
@@ -176,6 +179,18 @@ claude mcp add wow-backend \
 
 > Acesso remoto à VPS: SSH tunnel (`ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 user@vps`)
 > ou Tailscale/NetBird — o mesmo perfil privado da API. Nada é publicado na internet.
+
+## Mutações (confirmação obrigatória)
+
+`lock_account` é destrutiva e exige dois passos:
+
+1. `lock_account(account_id=5, locked=true, reason="gold farming")` → retorna o
+   preview (`dry_run: true`) sem alterar nada;
+2. `lock_account(account_id=5, locked=true, reason="gold farming", dry_run=false)`
+   → aplica e registra no audit log.
+
+Toda mutação e toda negação de permissão ficam em `admin_audit_log` (PostgreSQL),
+consultável pela tool `get_audit_log`. O reason informado vai junto no registro.
 
 ## Testes
 

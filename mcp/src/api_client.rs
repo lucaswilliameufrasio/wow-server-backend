@@ -85,6 +85,18 @@ impl ApiClient {
             .map_err(ApiError::Transport)
     }
 
+    pub async fn patch_json<T: DeserializeOwned, B: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T, ApiError> {
+        self.send_with_body(path, reqwest::Method::PATCH, Some(body), None)
+            .await?
+            .json()
+            .await
+            .map_err(ApiError::Transport)
+    }
+
     pub async fn get_text(&self, path: &str) -> Result<String, ApiError> {
         self.send(path, None)
             .await?
@@ -98,14 +110,33 @@ impl ApiClient {
         path: &str,
         query: Option<&[(&str, String)]>,
     ) -> Result<reqwest::Response, ApiError> {
+        self.send_with_body(
+            path,
+            reqwest::Method::GET,
+            None::<&serde_json::Value>,
+            query,
+        )
+        .await
+    }
+
+    async fn send_with_body<B: serde::Serialize>(
+        &self,
+        path: &str,
+        method: reqwest::Method,
+        body: Option<&B>,
+        query: Option<&[(&str, String)]>,
+    ) -> Result<reqwest::Response, ApiError> {
         let url = format!("{}{}", self.base_url, path);
 
-        let mut request = self.http.get(&url);
+        let mut request = self.http.request(method, &url);
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
         if let Some(query) = query {
             request = request.query(query);
+        }
+        if let Some(body) = body {
+            request = request.json(body);
         }
 
         let response = request.send().await.map_err(ApiError::Transport)?;

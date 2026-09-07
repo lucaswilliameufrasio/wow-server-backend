@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::api_client::{ApiClient, ApiError};
 use crate::dto::{
-    AdminAccountLocationsResponse, AdminPlayersResponse, HealthCheckResponse, ItemListResponse,
-    ItemSummary, OnlinePlayerSummary,
+    AccountLockResponse, AdminAccountLocationsResponse, AdminPlayersResponse, AuditLogListResponse,
+    HealthCheckResponse, ItemListResponse, ItemSummary, OnlinePlayerSummary,
 };
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -37,6 +37,28 @@ pub struct SearchItemsArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct GetItemArgs {
     pub entry: u32,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LockAccountArgs {
+    #[schemars(description = "Account id to lock or unlock")]
+    pub account_id: u64,
+    #[schemars(description = "true to lock the account, false to unlock it")]
+    pub locked: bool,
+    #[schemars(
+        description = "Defaults to true. Run with dry_run=false to actually apply the change after reviewing the preview."
+    )]
+    pub dry_run: Option<bool>,
+    #[schemars(description = "Optional reason recorded in the server audit log")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetAuditLogArgs {
+    #[schemars(description = "Max entries to return (1-200, default 50)")]
+    pub limit: Option<u32>,
+    #[schemars(description = "Pagination cursor: last entry id from the previous page")]
+    pub cursor: Option<i64>,
 }
 
 fn pretty<T: Serialize>(value: &T) -> String {
@@ -152,6 +174,64 @@ impl WowMcp {
     }
 
     #[tool(
+        description = "Lock or unlock a player account. DESTRUCTIVE: requires explicit operator confirmation. First call with dry_run=true (default) to preview, then call again with dry_run=false to apply.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn lock_account(
+        &self,
+        Parameters(LockAccountArgs {
+            account_id,
+            locked,
+            dry_run,
+            reason,
+        }): Parameters<LockAccountArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let dry_run = dry_run.unwrap_or(true);
+
+        if dry_run {
+            let mut preview = serde_json::json!({
+                "dry_run": true,
+                "account_id": account_id,
+                "would_set_locked": locked,
+                "next_step": "Call again with dry_run=false to apply this change."
+            });
+            if let Some(r) = reason.as_deref().filter(|r| !r.trim().is_empty()) {
+                preview["reason"] = serde_json::json!(r);
+            }
+            return Ok(json_result(&preview));
+        }
+
+        let mut body = serde_json::json!({ "locked": locked });
+        if let Some(r) = reason.as_deref().filter(|r| !r.trim().is_empty()) {
+            body["reason"] = serde_json::json!(r);
+        }
+
+        match self.fetch_lock_account(account_id, &body).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Get recent admin audit log entries (mutations and denied attempts), newest first",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_audit_log(
+        &self,
+        Parameters(GetAuditLogArgs { limit, cursor }): Parameters<GetAuditLogArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.fetch_audit_log(limit, cursor).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
         description = "Get Prometheus metrics from the backend API",
         annotations(read_only_hint = true)
     )]
@@ -229,6 +309,33 @@ impl WowMcp {
 
     pub async fn fetch_health(&self) -> Result<HealthCheckResponse, ApiError> {
         self.api.get_json("/health-check").await
+    }
+
+    pub async fn fetch_lock_account(
+        &self,
+        account_id: u64,
+        body: &serde_json::Value,
+    ) -> Result<AccountLockResponse, ApiError> {
+        self.api
+            .patch_json(&format!("/v1/admin/players/{account_id}/lock"), body)
+            .await
+    }
+
+    pub async fn fetch_audit_log(
+        &self,
+        limit: Option<u32>,
+        cursor: Option<i64>,
+    ) -> Result<AuditLogListResponse, ApiError> {
+        let mut query: Vec<(&str, String)> = Vec::new();
+        if let Some(v) = limit {
+            query.push(("limit", v.to_string()));
+        }
+        if let Some(v) = cursor {
+            query.push(("cursor", v.to_string()));
+        }
+        self.api
+            .get_json_with_query("/v1/admin/audit-log", &query)
+            .await
     }
 
     pub async fn fetch_metrics(&self) -> Result<String, ApiError> {
@@ -438,6 +545,42 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.status_code(), Some(StatusCode::BAD_REQUEST));
+    }
+
+    #[tokio::test]
+    async fn lock_account_dry_run_by_default_never_calls_patch() {
+        let base = mock::spawn().await;
+        let mcp = client(&base);
+        let result = mcp
+            .lock_account(Parameters(LockAccountArgs {
+                account_id: 5,
+                locked: true,
+                dry_run: None,
+                reason: Some("cheating".to_string()),
+            }))
+            .await
+            .unwrap();
+        assert!(!result.is_error.unwrap_or(false));
+        let text = format!("{result:?}");
+        assert!(text.contains("dry_run"));
+        assert!(text.contains("would_set_locked"));
+    }
+
+    #[tokio::test]
+    async fn lock_account_applies_on_confirmed_call() {
+        let base = mock::spawn().await;
+        let body = serde_json::json!({ "locked": true, "reason": "cheating" });
+        let response = client(&base).fetch_lock_account(5, &body).await.unwrap();
+        assert_eq!(response.account_id, 5);
+        assert!(response.locked);
+    }
+
+    #[tokio::test]
+    async fn fetch_audit_log_returns_entries() {
+        let base = mock::spawn().await;
+        let response = client(&base).fetch_audit_log(Some(10), None).await.unwrap();
+        assert_eq!(response.entries.len(), 1);
+        assert_eq!(response.entries[0].action, "account.lock");
     }
 
     #[tokio::test]
