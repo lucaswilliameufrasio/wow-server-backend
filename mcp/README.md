@@ -25,6 +25,10 @@ Baseado no SDK oficial [rmcp](https://github.com/modelcontextprotocol/rust-sdk) 
 | `ban_account` | SOAP `ban account` via API (requer `players:ban`, destructive + dry_run) |
 | `unban_account` | SOAP `unban account` via API (requer `players:ban`) |
 | `schedule_restart` | SOAP `server restart` via API (requer `server:control`, destructive + dry_run) |
+| `teleport_player` | SOAP `tele name` via API (requer `players:modify`, destructive + dry_run) |
+| `give_item` | SOAP `additem name` via API (requer `players:modify`, destructive + dry_run) |
+| `modify_money` | SOAP `modify money name` via API (requer `players:modify`, destructive + dry_run) |
+| `set_level` | SOAP `setlevel name` via API (requer `players:modify`, destructive + dry_run) |
 | `run_gm_command` | SOAP raw via API — **desabilitada por padrão** (ver abaixo) |
 
 Tools read-only têm `read_only_hint = true`; mutações destrutivas (`lock_account`,
@@ -134,6 +138,8 @@ printf '%s\n' \
 - "A API está saudável? Mostra as métricas."
 - "Qual o status do worldserver? Manda um aviso que vai reiniciar em 15 min."
 - "Bane a conta Cheater por 7 dias por exploits." (pede confirmação via dry_run)
+- "Teleporta o Xerath para Stormwind City e dá 2 Thunderfury." (pede confirmação)
+- "Adiciona 1000 gold pro Uther e sobe pra 80." (pede confirmação)
 
 ## Registro por cliente
 

@@ -203,6 +203,42 @@ pub async fn spawn() -> String {
                     "result": "Account Cheater unbanned."
                 }))
             }),
+        )
+        .route(
+            "/v1/admin/players/teleport",
+            post(|| async {
+                Json(json!({
+                    "command": "tele name Xerath Stormwind City",
+                    "result": "You teleport Xerath to Stormwind City."
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/players/items",
+            post(|| async {
+                Json(json!({
+                    "command": "additem name Xerath 19019 2",
+                    "result": "Added item 19019 to Xerath."
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/players/money",
+            post(|| async {
+                Json(json!({
+                    "command": "modify money name Xerath 12345g67s89c",
+                    "result": "Money modified."
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/players/level",
+            post(|| async {
+                Json(json!({
+                    "command": "setlevel name Xerath 80",
+                    "result": "Level set to 80."
+                }))
+            }),
         );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -128,6 +128,54 @@ pub struct GmCommandArgs {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ServerStatusArgs {}
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct TeleportPlayerArgs {
+    #[schemars(description = "In-game character name (2-12 letters)")]
+    pub character_name: String,
+    #[schemars(
+        description = "Teleport location name as shown in .tele list (e.g. 'Stormwind City')"
+    )]
+    pub location: String,
+    #[schemars(description = "Defaults to true. Run with dry_run=false to actually teleport.")]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GiveItemArgs {
+    #[schemars(description = "In-game character name (2-12 letters)")]
+    pub character_name: String,
+    #[schemars(description = "Item template entry id (e.g. 19019 for Thunderfury)")]
+    pub item_entry: u32,
+    #[schemars(description = "Stack count (1-1000, default 1)")]
+    pub count: Option<u32>,
+    #[schemars(
+        description = "Defaults to true. Run with dry_run=false to actually give the item."
+    )]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ModifyMoneyArgs {
+    #[schemars(description = "In-game character name (2-12 letters)")]
+    pub character_name: String,
+    #[schemars(description = "Amount in copper; negative removes money. |amount| <= 2147483647")]
+    pub amount: i64,
+    #[schemars(description = "Defaults to true. Run with dry_run=false to actually modify money.")]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetLevelArgs {
+    #[schemars(description = "In-game character name (2-12 letters)")]
+    pub character_name: String,
+    #[schemars(description = "Absolute level to set (1-80)")]
+    pub level: u8,
+    #[schemars(
+        description = "Defaults to true. Run with dry_run=false to actually set the level."
+    )]
+    pub dry_run: Option<bool>,
+}
+
 fn pretty<T: Serialize>(value: &T) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
 }
@@ -439,6 +487,139 @@ impl WowMcp {
     }
 
     #[tool(
+        description = "Teleport a character to a known .tele location. DESTRUCTIVE: requires explicit confirmation via dry_run=false.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn teleport_player(
+        &self,
+        Parameters(TeleportPlayerArgs {
+            character_name,
+            location,
+            dry_run,
+        }): Parameters<TeleportPlayerArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if dry_run.unwrap_or(true) {
+            return Ok(json_result(&serde_json::json!({
+                "dry_run": true,
+                "character_name": character_name,
+                "location": location,
+                "next_step": "Call again with dry_run=false to apply this change."
+            })));
+        }
+
+        match self.fetch_teleport(&character_name, &location).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Give an item to a character's inventory. DESTRUCTIVE: requires explicit confirmation via dry_run=false.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn give_item(
+        &self,
+        Parameters(GiveItemArgs {
+            character_name,
+            item_entry,
+            count,
+            dry_run,
+        }): Parameters<GiveItemArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if dry_run.unwrap_or(true) {
+            return Ok(json_result(&serde_json::json!({
+                "dry_run": true,
+                "character_name": character_name,
+                "item_entry": item_entry,
+                "count": count.unwrap_or(1),
+                "next_step": "Call again with dry_run=false to apply this change."
+            })));
+        }
+
+        match self
+            .fetch_give_item(&character_name, item_entry, count)
+            .await
+        {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Add or remove money from a character (copper; negative amount removes). DESTRUCTIVE: requires explicit confirmation via dry_run=false.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn modify_money(
+        &self,
+        Parameters(ModifyMoneyArgs {
+            character_name,
+            amount,
+            dry_run,
+        }): Parameters<ModifyMoneyArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if dry_run.unwrap_or(true) {
+            return Ok(json_result(&serde_json::json!({
+                "dry_run": true,
+                "character_name": character_name,
+                "amount_copper": amount,
+                "next_step": "Call again with dry_run=false to apply this change."
+            })));
+        }
+
+        match self.fetch_modify_money(&character_name, amount).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Set a character's absolute level (1-80). DESTRUCTIVE: requires explicit confirmation via dry_run=false.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn set_level(
+        &self,
+        Parameters(SetLevelArgs {
+            character_name,
+            level,
+            dry_run,
+        }): Parameters<SetLevelArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if dry_run.unwrap_or(true) {
+            return Ok(json_result(&serde_json::json!({
+                "dry_run": true,
+                "character_name": character_name,
+                "level": level,
+                "next_step": "Call again with dry_run=false to apply this change."
+            })));
+        }
+
+        match self.fetch_set_level(&character_name, level).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
         description = "Lock or unlock a player account. DESTRUCTIVE: requires explicit operator confirmation. First call with dry_run=true (default) to preview, then call again with dry_run=false to apply.",
         annotations(
             read_only_hint = false,
@@ -644,6 +825,63 @@ impl WowMcp {
             .post_json(
                 "/v1/admin/server/command",
                 &serde_json::json!({ "command": command }),
+            )
+            .await
+    }
+
+    pub async fn fetch_teleport(
+        &self,
+        character_name: &str,
+        location: &str,
+    ) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/players/teleport",
+                &serde_json::json!({ "character_name": character_name, "location": location }),
+            )
+            .await
+    }
+
+    pub async fn fetch_give_item(
+        &self,
+        character_name: &str,
+        item_entry: u32,
+        count: Option<u32>,
+    ) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/players/items",
+                &serde_json::json!({
+                    "character_name": character_name,
+                    "item_entry": item_entry,
+                    "count": count
+                }),
+            )
+            .await
+    }
+
+    pub async fn fetch_modify_money(
+        &self,
+        character_name: &str,
+        amount: i64,
+    ) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/players/money",
+                &serde_json::json!({ "character_name": character_name, "amount": amount }),
+            )
+            .await
+    }
+
+    pub async fn fetch_set_level(
+        &self,
+        character_name: &str,
+        level: u8,
+    ) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/players/level",
+                &serde_json::json!({ "character_name": character_name, "level": level }),
             )
             .await
     }
@@ -1021,6 +1259,80 @@ mod tests {
             .unwrap();
         assert!(!result.is_error.unwrap_or(false));
         assert!(format!("{result:?}").contains("900"));
+    }
+
+    #[tokio::test]
+    async fn player_modify_dry_run_previews() {
+        let base = mock::spawn().await;
+        let mcp = client(&base);
+
+        for (result, needle) in [
+            (
+                mcp.teleport_player(Parameters(TeleportPlayerArgs {
+                    character_name: "Xerath".to_string(),
+                    location: "Stormwind City".to_string(),
+                    dry_run: None,
+                }))
+                .await
+                .unwrap(),
+                "Stormwind City",
+            ),
+            (
+                mcp.give_item(Parameters(GiveItemArgs {
+                    character_name: "Xerath".to_string(),
+                    item_entry: 19019,
+                    count: None,
+                    dry_run: None,
+                }))
+                .await
+                .unwrap(),
+                "19019",
+            ),
+            (
+                mcp.modify_money(Parameters(ModifyMoneyArgs {
+                    character_name: "Xerath".to_string(),
+                    amount: -5000,
+                    dry_run: None,
+                }))
+                .await
+                .unwrap(),
+                "-5000",
+            ),
+            (
+                mcp.set_level(Parameters(SetLevelArgs {
+                    character_name: "Xerath".to_string(),
+                    level: 80,
+                    dry_run: None,
+                }))
+                .await
+                .unwrap(),
+                "80",
+            ),
+        ] {
+            assert!(!result.is_error.unwrap_or(false));
+            assert!(format!("{result:?}").contains(needle));
+        }
+    }
+
+    #[tokio::test]
+    async fn player_modify_confirmed_calls_backend() {
+        let base = mock::spawn().await;
+        let mcp = client(&base);
+
+        let teleport = mcp
+            .fetch_teleport("Xerath", "Stormwind City")
+            .await
+            .unwrap();
+        assert!(teleport.command.contains("tele name Xerath"));
+
+        let item = mcp.fetch_give_item("Xerath", 19019, Some(2)).await.unwrap();
+        assert!(item.command.contains("additem name Xerath 19019 2"));
+
+        let money = mcp.fetch_modify_money("Xerath", 123_456_789).await.unwrap();
+        assert!(money.command.contains("12345g67s89c"));
+
+        let level = mcp.fetch_set_level("Xerath", 80).await.unwrap();
+        assert!(level.command.contains("setlevel name Xerath 80"));
     }
 
     #[tokio::test]
