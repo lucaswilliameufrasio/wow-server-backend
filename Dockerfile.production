@@ -8,13 +8,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock ./
+COPY mcp/Cargo.toml ./mcp/Cargo.toml
 
+# Dummy sources so dependency compilation is cached; only the API package is
+# needed in this image, so the workspace is built with -p rust-http-service.
 RUN mkdir -p src && echo 'fn main() {}' > src/main.rs \
-    && cargo build --release
+    && mkdir -p mcp/src && echo 'fn main() {}' > mcp/src/main.rs \
+    && cargo build --release -p rust-http-service
 
 COPY src ./src
 COPY migrations ./migrations
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs && cargo build --release -p rust-http-service
 
 FROM debian:bookworm-slim
 WORKDIR /app
