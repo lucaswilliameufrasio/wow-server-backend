@@ -30,12 +30,12 @@ Regras:
 
 ## Autenticação
 
-- v1: bearer token via `MCP_API_TOKEN` (access token de conta com `players:read`/`items:read`).
-  O MCP envia `Authorization: Bearer` em todos os requests; nenhum token persiste em disco.
-- Próximo passo (passo 4 do plano): service tokens de longa duração e revogáveis na API,
-  eliminando o token de 15 min de uma conta humana.
-- Config via env/secret file: `MCP_API_BASE_URL`, `MCP_API_TOKEN`,
-  `MCP_REQUEST_TIMEOUT_SECS`.
+- Service tokens da API (`wowst_...`): longa duração, revogáveis, hash SHA-256 no
+  banco, herdam o RBAC da conta criadora (admin via `POST /v1/admin/service-tokens`).
+  O MCP envia `Authorization: Bearer wowst_...`; nenhum token persiste em disco.
+- Alternativa de teste: access token JWT de 15 min.
+- Config via env/secret file: `MCP_API_BASE_URL`, `MCP_METRICS_BASE_URL`,
+  `MCP_API_TOKEN`, `MCP_REQUEST_TIMEOUT_SECS`.
 - Transporte **stdio** (uso local via SSH tunnel/Tailscale, mesmo perfil privado da API).
   Streamable HTTP só se houver necessidade de acesso remoto multiusuário.
 
@@ -51,10 +51,7 @@ Baseada nos endpoints que já existem:
 | `search_items(search?, class?, limit?, cursor?)` | `GET /v1/items` | `items:read` |
 | `get_item(entry)` | `GET /v1/items/{entry}` | `items:read` |
 | `get_health()` | `GET /health-check` | pública |
-| `get_metrics()` | `GET /metrics` | protegida na API* |
-
-\* `/metrics` e `/swagger-ui` hoje são rotas públicas na aplicação; proteger antes de
-expor via MCP.
+| `get_metrics()` | `GET :METRICS_PORT/metrics` (Prometheus) | porta dedicada e privada |
 
 ## Resources (v1)
 
@@ -95,13 +92,15 @@ orquestrado pela API — nunca o MCP falando SOAP/banco direto):
 
 ## Faltando na API (pré-requisitos para v2/v3)
 
-1. Service tokens (longa duração, revogáveis, sem refresh rotativo de humano).
+1. **Feito** — service tokens (`wowst_...`, permissão `tokens:manage`, endpoints
+   `GET/POST /v1/admin/service-tokens`, `DELETE /v1/admin/service-tokens/{id}`).
 2. Audit log persistente (PostgreSQL já está disponível para isso).
 3. RBAC granular além de `players:read`/`players:write` (ex.: `server:restart`,
    `players:kick`, `players:ban`).
-4. Redação de PII: `last_ip` e e-mail não devem trafegar por padrão em respostas
-   destinadas a LLM.
-5. Proteção de `/metrics` e `/swagger-ui`.
+4. **Feito no MCP** — redação de PII na fronteira (DTOs sem `email`/`last_ip`);
+   a API ainda os retorna para clientes confiáveis.
+5. **Feito** — `/metrics` em porta dedicada (`METRICS_PORT` 9090, bind privado);
+   `/swagger-ui` continua local-only na API.
 6. Camada de integração com o WorldServer (módulo do core ou SOAP encapsulado na API).
 
 ## Tratamento de erros
@@ -135,7 +134,7 @@ mcp/
 2. **Feito** — spec (este documento).
 3. **Feito** — MCP v1 read-only (crate `wow-mcp`, SDK rmcp 3.2, transporte stdio):
    7 tools, 3 resources + template `item://{entry}`, redação de PII, testes com mock.
-4. Service token + proteção de `/metrics`.
+4. **Feito** — service tokens (`wowst_...`) na API + `/metrics` em porta privada.
 5. Audit log + `lock_account` com `dry_run`/confirmação.
 6. Integração WorldServer (módulo do core ou SOAP) → status/kick/ban/anúncio/restart.
 7. Por último: teleport, give item, dinheiro, level, e `execute_gm_command` atrás de

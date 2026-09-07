@@ -54,12 +54,13 @@ fn api_tool_error(err: ApiError) -> CallToolResult {
 #[derive(Clone)]
 pub struct WowMcp {
     api: Arc<ApiClient>,
+    metrics_api: Arc<ApiClient>,
 }
 
 #[tool_router]
 impl WowMcp {
-    pub fn new(api: Arc<ApiClient>) -> Self {
-        Self { api }
+    pub fn new(api: Arc<ApiClient>, metrics_api: Arc<ApiClient>) -> Self {
+        Self { api, metrics_api }
     }
 
     #[tool(
@@ -231,7 +232,7 @@ impl WowMcp {
     }
 
     pub async fn fetch_metrics(&self) -> Result<String, ApiError> {
-        self.api.get_text("/metrics").await
+        self.metrics_api.get_text("/metrics").await
     }
 
     pub async fn read_uri(&self, uri: &str) -> Result<String, ApiError> {
@@ -240,7 +241,7 @@ impl WowMcp {
                 let health: HealthCheckResponse = self.api.get_json("/health-check").await?;
                 Ok(pretty(&health))
             }
-            "server://metrics" => self.api.get_text("/metrics").await,
+            "server://metrics" => self.metrics_api.get_text("/metrics").await,
             "players://online" => {
                 let players: Vec<OnlinePlayerSummary> =
                     self.api.get_json("/v1/admin/online-players").await?;
@@ -341,7 +342,8 @@ mod tests {
 
     fn client(base_url: &str) -> WowMcp {
         let api = Arc::new(ApiClient::new(base_url.to_string(), None, 5).unwrap());
-        WowMcp::new(api)
+        let metrics_api = Arc::new(ApiClient::new(base_url.to_string(), None, 5).unwrap());
+        WowMcp::new(api, metrics_api)
     }
 
     #[tokio::test]
@@ -398,7 +400,8 @@ mod tests {
     #[tokio::test]
     async fn tool_error_when_api_unreachable() {
         let api = Arc::new(ApiClient::new("http://127.0.0.1:1", None, 1).unwrap());
-        let mcp = WowMcp::new(api);
+        let metrics_api = Arc::new(ApiClient::new("http://127.0.0.1:1", None, 1).unwrap());
+        let mcp = WowMcp::new(api, metrics_api);
         let result = mcp.get_health().await.unwrap();
         assert!(result.is_error.unwrap_or(false));
     }

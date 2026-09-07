@@ -29,8 +29,13 @@ async fn main() -> Result<()> {
         config.api_token.clone(),
         config.request_timeout_secs,
     )?);
+    let metrics_api = Arc::new(api_client::ApiClient::new(
+        &config.metrics_base_url,
+        None,
+        config.request_timeout_secs,
+    )?);
 
-    let service = WowMcp::new(api);
+    let service = WowMcp::new(api, metrics_api);
     let server = service.serve(stdio()).await?;
     server.waiting().await?;
     Ok(())
