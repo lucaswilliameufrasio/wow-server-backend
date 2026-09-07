@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 #[derive(Clone)]
 pub struct AppConfig {
@@ -102,7 +102,7 @@ pub struct SignInResponse {
     pub refresh_expires_in_seconds: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct AuthMeResponse {
     pub account_id: u64,
     pub username: String,
@@ -125,12 +125,12 @@ pub struct RefreshTokenResponse {
     pub refresh_expires_in_seconds: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct LogoutRequest {
     pub refresh_token: Option<String>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct CharacterSummary {
     pub guid: u64,
     pub name: String,
@@ -145,13 +145,13 @@ pub struct CharacterSummary {
     pub money: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct CharacterListResponse {
     pub account_id: u64,
     pub characters: Vec<CharacterSummary>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct CharacterLocationResponse {
     pub guid: u64,
     pub name: String,
@@ -164,7 +164,7 @@ pub struct CharacterLocationResponse {
     pub online: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema, IntoParams)]
 pub struct AdminPlayersQuery {
     pub limit: Option<u32>,
     pub cursor: Option<u64>,
@@ -172,7 +172,7 @@ pub struct AdminPlayersQuery {
     pub online: Option<bool>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct AdminPlayerSummary {
     pub id: u64,
     pub username: String,
@@ -186,14 +186,14 @@ pub struct AdminPlayerSummary {
     pub character_count: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct AdminPlayersResponse {
     pub limit: u32,
     pub cursor: Option<u64>,
     pub players: Vec<AdminPlayerSummary>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct OnlinePlayerSummary {
     pub account_id: u64,
     pub username: String,
@@ -204,7 +204,7 @@ pub struct OnlinePlayerSummary {
     pub zone: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct AdminAccountLocationsResponse {
     pub account_id: u64,
     pub username: String,
@@ -359,7 +359,7 @@ pub struct SoapCommandResponse {
     pub result: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema, IntoParams)]
 pub struct ItemQuery {
     pub limit: Option<u32>,
     pub cursor: Option<u32>,
@@ -367,7 +367,7 @@ pub struct ItemQuery {
     pub class: Option<u8>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct ItemSummary {
     pub entry: u32,
     pub name: String,
@@ -378,7 +378,7 @@ pub struct ItemSummary {
     pub display_id: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct ItemListResponse {
     pub limit: u32,
     pub cursor: Option<u32>,

@@ -28,8 +28,17 @@ use serde_json::json;
         register_handler,
         sign_in_handler,
         refresh_token_handler,
+        logout_handler,
+        auth_me_handler,
+        characters_handler,
+        character_location_handler,
+        items_handler,
+        item_by_entry_handler,
         diagnostics_handler,
+        admin_players_handler,
+        admin_player_locations_handler,
         admin_lock_player_handler,
+        admin_online_players_handler,
         admin_create_service_token_handler,
         admin_list_service_tokens_handler,
         admin_revoke_service_token_handler,
@@ -78,6 +87,21 @@ use serde_json::json;
             ModifyMoneyRequest,
             SetLevelRequest,
             LogTailResponse,
+            RefreshTokenRequest,
+            RefreshTokenResponse,
+            LogoutRequest,
+            AuthMeResponse,
+            CharacterSummary,
+            CharacterListResponse,
+            CharacterLocationResponse,
+            AdminPlayersQuery,
+            AdminPlayerSummary,
+            AdminPlayersResponse,
+            OnlinePlayerSummary,
+            AdminAccountLocationsResponse,
+            ItemQuery,
+            ItemSummary,
+            ItemListResponse,
         )
     ),
     tags(
@@ -284,6 +308,11 @@ async fn require_permission_audited(
         "You are not allowed to perform this action",
         "RBAC_FORBIDDEN",
     ))
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn openapi_json() -> serde_json::Value {
+    serde_json::to_value(ApiDoc::openapi()).unwrap_or(serde_json::Value::Null)
 }
 
 pub fn build_metrics_router() -> Router {
@@ -543,6 +572,16 @@ async fn refresh_token_handler(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/auth/logout",
+    request_body = LogoutRequest,
+    responses(
+        (status = 204, description = "Tokens revoked"),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+    ),
+    tag = "auth"
+)]
 async fn logout_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -573,6 +612,15 @@ async fn logout_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/auth/me",
+    responses(
+        (status = 200, description = "Current account context", body = AuthMeResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+    ),
+    tag = "auth"
+)]
 async fn auth_me_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -588,6 +636,15 @@ async fn auth_me_handler(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/characters",
+    responses(
+        (status = 200, description = "Characters owned by the account", body = CharacterListResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+    ),
+    tag = "auth"
+)]
 async fn characters_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -601,6 +658,17 @@ async fn characters_handler(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/characters/{guid}/location",
+    responses(
+        (status = 200, description = "Character location", body = CharacterLocationResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Not the owner and missing characters:location:any", body = ErrorResponse),
+        (status = 404, description = "Character not found", body = ErrorResponse),
+    ),
+    tag = "auth"
+)]
 async fn character_location_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -630,6 +698,17 @@ async fn character_location_handler(
     Ok(Json(location))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/admin/players",
+    params(AdminPlayersQuery),
+    responses(
+        (status = 200, description = "Player accounts (paginated)", body = AdminPlayersResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Requires players:read", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
 async fn admin_players_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -652,6 +731,17 @@ async fn admin_players_handler(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/admin/players/{account_id}/locations",
+    responses(
+        (status = 200, description = "Character locations for an account", body = AdminAccountLocationsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Requires players:read", body = ErrorResponse),
+        (status = 404, description = "Account not found", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
 async fn admin_player_locations_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -735,6 +825,16 @@ async fn admin_lock_player_handler(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/admin/online-players",
+    responses(
+        (status = 200, description = "Characters currently online", body = [OnlinePlayerSummary]),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Requires players:read", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
 async fn admin_online_players_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -746,6 +846,17 @@ async fn admin_online_players_handler(
     Ok(Json(players))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/items",
+    params(ItemQuery),
+    responses(
+        (status = 200, description = "Item templates (paginated)", body = ItemListResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Requires items:read", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
 async fn items_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -764,6 +875,17 @@ async fn items_handler(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/items/{entry}",
+    responses(
+        (status = 200, description = "Item template", body = ItemSummary),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Requires items:read", body = ErrorResponse),
+        (status = 404, description = "Item not found", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
 async fn item_by_entry_handler(
     State(state): State<AppState>,
     headers: HeaderMap,

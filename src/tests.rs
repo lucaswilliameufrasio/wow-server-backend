@@ -3622,3 +3622,69 @@ async fn server_crashes_missing_file_returns_404() {
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// OpenAPI coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn openapi_covers_all_v1_routes() {
+    let doc = crate::handlers::openapi_json();
+    let paths = doc["paths"].as_object().expect("paths object");
+    let registered: Vec<&str> = paths.keys().map(|k| k.as_str()).collect();
+
+    for route in [
+        "/health-check",
+        "/v1/auth/register",
+        "/v1/auth/sign-in",
+        "/v1/auth/refresh",
+        "/v1/auth/logout",
+        "/v1/auth/me",
+        "/v1/characters",
+        "/v1/characters/{guid}/location",
+        "/v1/items",
+        "/v1/items/{entry}",
+        "/v1/admin/players",
+        "/v1/admin/players/{account_id}/locations",
+        "/v1/admin/players/{account_id}/lock",
+        "/v1/admin/players/kick",
+        "/v1/admin/players/teleport",
+        "/v1/admin/players/items",
+        "/v1/admin/players/money",
+        "/v1/admin/players/level",
+        "/v1/admin/online-players",
+        "/v1/admin/service-tokens",
+        "/v1/admin/service-tokens/{token_id}",
+        "/v1/admin/audit-log",
+        "/v1/admin/server/status",
+        "/v1/admin/server/announce",
+        "/v1/admin/server/restart",
+        "/v1/admin/server/command",
+        "/v1/admin/server/logs",
+        "/v1/admin/server/crashes",
+        "/v1/admin/accounts/ban",
+        "/v1/admin/accounts/unban",
+    ] {
+        assert!(
+            registered.contains(&route),
+            "route {route} missing from OpenAPI paths"
+        );
+    }
+
+    for schema in [
+        "SignInResponse",
+        "CharacterSummary",
+        "ItemSummary",
+        "AdminPlayerSummary",
+        "ServiceTokenSummary",
+        "AuditLogEntry",
+        "SoapCommandResponse",
+        "LogTailResponse",
+    ] {
+        let schemas = doc["components"]["schemas"].as_object().expect("schemas");
+        assert!(
+            schemas.contains_key(schema),
+            "schema {schema} missing from OpenAPI components"
+        );
+    }
+}
