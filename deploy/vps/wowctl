@@ -340,6 +340,102 @@ cmd_create_account() {
   fi
 }
 
+api_bearer_token() {
+  local username="$1" password="$2"
+  local port="${WOW_API_PORT:-3000}"
+  local resp
+  resp=$(curl -sf -X POST "http://127.0.0.1:$port/v1/auth/sign-in" \
+    -H 'content-type: application/json' \
+    -d "{\"username\":\"$username\",\"password\":\"$password\"}" 2>/dev/null) || {
+    fail "Sign-in failed for '$username'. Is the API running and the password correct?"
+  }
+  echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
+}
+
+cmd_create_mcp_token() {
+  load_env
+  local username="${1:-}"
+  local password="${2:-}"
+  local name="${3:-mcp}"
+  local days="${4:-90}"
+
+  if [[ -z "$username" || -z "$password" ]]; then
+    echo "Usage: ./wowctl create-mcp-token <admin_user> <admin_password> [name] [days]"
+    exit 1
+  fi
+
+  info "Creating service token '$name' (expires in $days days) ..."
+  local jwt token
+  jwt=$(api_bearer_token "$username" "$password")
+  local port="${WOW_API_PORT:-3000}"
+  local resp
+  resp=$(curl -sf -X POST "http://127.0.0.1:$port/v1/admin/service-tokens" \
+    -H "Authorization: Bearer $jwt" \
+    -H 'content-type: application/json' \
+    -d "{\"name\":\"$name\",\"expires_in_days\":$days}" 2>/dev/null) || {
+    fail "Failed to create service token (does the account have tokens:manage?)"
+  }
+
+  token=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+  local token_id
+  token_id=$(echo "$resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+  ok "Service token created (id: $token_id, name: $name)"
+  echo ""
+  echo "  $token"
+  echo ""
+  warn "This token is shown ONCE. Store it in MCP_API_TOKEN."
+}
+
+cmd_list_mcp_tokens() {
+  load_env
+  local username="${1:-}"
+  local password="${2:-}"
+
+  if [[ -z "$username" || -z "$password" ]]; then
+    echo "Usage: ./wowctl list-mcp-tokens <admin_user> <admin_password>"
+    exit 1
+  fi
+
+  local jwt
+  jwt=$(api_bearer_token "$username" "$password")
+  local port="${WOW_API_PORT:-3000}"
+  curl -sf "http://127.0.0.1:$port/v1/admin/service-tokens" \
+    -H "Authorization: Bearer $jwt" 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+tokens = data.get('tokens', [])
+if not tokens:
+    print('No service tokens.')
+    sys.exit(0)
+print('%4s  %-20s  %10s  %-8s %s' % ('ID', 'NAME', 'CREATED_BY', 'REVOKED', 'LAST_USED'))
+for t in tokens:
+    print('%4d  %-20s  %10d  %-8s %s' % (t['id'], t['name'][:20], t['created_by'], 'yes' if t.get('revoked_at_unix') else 'no', str(t.get('last_used_at_unix') or '-')))
+" || fail "Failed to list service tokens"
+}
+
+cmd_revoke_mcp_token() {
+  load_env
+  local username="${1:-}"
+  local password="${2:-}"
+  local token_id="${3:-}"
+
+  if [[ -z "$username" || -z "$password" || -z "$token_id" ]]; then
+    echo "Usage: ./wowctl revoke-mcp-token <admin_user> <admin_password> <token_id>"
+    exit 1
+  fi
+
+  info "Revoking service token $token_id ..."
+  local jwt
+  jwt=$(api_bearer_token "$username" "$password")
+  local port="${WOW_API_PORT:-3000}"
+  if curl -sf -X DELETE "http://127.0.0.1:$port/v1/admin/service-tokens/$token_id" \
+    -H "Authorization: Bearer $jwt" >/dev/null 2>&1; then
+    ok "Service token $token_id revoked"
+  else
+    fail "Failed to revoke token $token_id (not found or already revoked?)"
+  fi
+}
+
 cmd_smoke_test() {
   require_docker; load_env
   local port="${WOW_API_PORT:-3000}"
@@ -702,6 +798,9 @@ Lifecycle:
 Configuration:
   set-realm [ip] [localIP]  Update realm address in database (+ write realmlist.wtf)
   create-account <user> <pass> [gmlevel]  Create WoW account via API
+  create-mcp-token <user> <pass> [name] [days]  Create service token for MCP (shown once)
+  list-mcp-tokens <user> <pass>          List service tokens
+  revoke-mcp-token <user> <pass> <id>    Revoke a service token
   setup-game [admin] [pass] [realm]  One-shot: GM account + realm + seeds + reload + smoke-test
   reload [target]           Reload worldserver configs via SOAP (default: all)
 
@@ -729,7 +828,7 @@ cmd="${1:-help}"
 shift 2>/dev/null || true
 
 case "$cmd" in
-  install|up|down|status|logs|set-realm|create-account|setup-game|reload|smoke-test|backup|restore|update|rollback|build|help)
+  install|up|down|status|logs|set-realm|create-account|create-mcp-token|list-mcp-tokens|revoke-mcp-token|setup-game|reload|smoke-test|backup|restore|update|rollback|build|help)
     fn="cmd_$(printf '%s' "$cmd" | tr - _)"
     "$fn" "$@"
     ;;

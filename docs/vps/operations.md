@@ -52,6 +52,16 @@ Exemplo:
 ./wowctl create-account GuildMaster SenhaForte123 3
 ```
 
+## Service tokens (MCP/automação)
+
+```bash
+./wowctl create-mcp-token <admin_user> <admin_password> [name] [days]
+./wowctl list-mcp-tokens <admin_user> <admin_password>
+./wowctl revoke-mcp-token <admin_user> <admin_password> <token_id>
+```
+
+O token `wowst_...` é mostrado **uma vez**; use em `MCP_API_TOKEN` do wow-mcp.
+
 ## Setup completo (uma vez)
 
 Depois de subir os serviços, `setup-game` prepara tudo em um comando: conta GM,

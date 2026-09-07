@@ -134,7 +134,8 @@ mcp/
 ## Plano incremental
 
 1. **Feito** — sanitizar histórico (caminhos locais), gitleaks no CI.
-2. **Feito** — spec (este documento).
+2. **Feito** — spec + OpenAPI completo (todas as rotas v1 documentadas, teste de
+   cobertura de paths/schemas no CI).
 3. **Feito** — MCP v1 read-only (crate `wow-mcp`, SDK rmcp 3.2, transporte stdio):
    7 tools, 3 resources + template `item://{entry}`, redação de PII, testes com mock.
 4. **Feito** — service tokens (`wowst_...`) na API + `/metrics` em porta privada.
