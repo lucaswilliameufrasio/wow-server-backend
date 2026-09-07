@@ -593,6 +593,31 @@ fn test_state_full(
     gm_command_enabled: bool,
     gm_command_allowlist: Option<Vec<String>>,
 ) -> AppState {
+    test_state_custom(
+        accounts,
+        characters,
+        items,
+        refresh_tokens,
+        audit,
+        soap,
+        gm_command_enabled,
+        gm_command_allowlist,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn test_state_custom(
+    accounts: MockAccountRepo,
+    characters: MockCharacterRepo,
+    items: MockItemRepo,
+    refresh_tokens: MockRefreshTokenRepo,
+    audit: MockAuditRepo,
+    soap: Option<Arc<dyn SoapClient>>,
+    gm_command_enabled: bool,
+    gm_command_allowlist: Option<Vec<String>>,
+    acore_logs_dir: Option<String>,
+) -> AppState {
     AppState {
         config: AppConfig {
             auth_db: "acore_auth".to_string(),
@@ -604,6 +629,7 @@ fn test_state_full(
             soap: None,
             gm_command_enabled,
             gm_command_allowlist,
+            acore_logs_dir,
         },
         jwt: test_jwt_config(),
         accounts: std::sync::Arc::new(accounts),
@@ -2118,6 +2144,7 @@ async fn integration_refresh_token_store_find_revoke() {
             soap: None,
             gm_command_enabled: false,
             gm_command_allowlist: None,
+            acore_logs_dir: None,
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),
@@ -2221,6 +2248,7 @@ async fn integration_access_token_revocation_roundtrip() {
             soap: None,
             gm_command_enabled: false,
             gm_command_allowlist: None,
+            acore_logs_dir: None,
         },
         jwt: jwt.clone(),
         accounts: Arc::new(MockAccountRepo::new()),
@@ -3432,4 +3460,165 @@ async fn player_modify_requires_admin() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+// ---------------------------------------------------------------------------
+// Server logs endpoints
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn read_tail_lines_returns_last_n() {
+    let dir = std::env::temp_dir().join(format!("wow-tail-unit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Server.log");
+    std::fs::write(
+        &path,
+        (1..=500)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+
+    let lines = read_tail_lines(&path, 3, 512 * 1024).unwrap();
+    assert_eq!(lines, vec!["line 498", "line 499", "line 500"]);
+
+    let lines = read_tail_lines(&path, 10, 90).unwrap();
+    assert_eq!(lines.len(), 10);
+    assert_eq!(lines[lines.len() - 1], "line 500");
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[tokio::test]
+async fn server_logs_not_configured_returns_503() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 1);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let jwt = issue_test_token(&state.jwt, 1, "MOD", 1);
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/server/logs")
+                .header(AUTHORIZATION, format!("Bearer {jwt}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = body_json(response).await;
+    assert_eq!(body["error_code"], "LOGS_NOT_CONFIGURED");
+}
+
+#[tokio::test]
+async fn server_logs_returns_tail() {
+    let dir = std::env::temp_dir().join(format!("wow-logs-srv-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Server.log"), "a\nb\nc").unwrap();
+
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 1);
+    let state = test_state_custom(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+        MockAuditRepo::new(),
+        Some(Arc::new(MockSoapClient::new())),
+        false,
+        None,
+        Some(dir.to_string_lossy().to_string()),
+    );
+    let jwt = issue_test_token(&state.jwt, 1, "MOD", 1);
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/server/logs?lines=2")
+                .header(AUTHORIZATION, format!("Bearer {jwt}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["file"], "Server.log");
+    assert_eq!(body["lines"], json!(["b", "c"]));
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[tokio::test]
+async fn server_crashes_missing_file_returns_404() {
+    let dir = std::env::temp_dir().join(format!("wow-crash-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 1);
+    let state = test_state_custom(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+        MockAuditRepo::new(),
+        Some(Arc::new(MockSoapClient::new())),
+        false,
+        None,
+        Some(dir.to_string_lossy().to_string()),
+    );
+    let jwt = issue_test_token(&state.jwt, 1, "MOD", 1);
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/server/crashes")
+                .header(AUTHORIZATION, format!("Bearer {jwt}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = body_json(response).await;
+    assert_eq!(body["error_code"], "LOG_FILE_NOT_FOUND");
+
+    std::fs::remove_dir_all(&dir).unwrap();
 }

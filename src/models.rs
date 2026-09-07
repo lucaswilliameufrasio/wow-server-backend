@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub soap: Option<SoapConfig>,
     pub gm_command_enabled: bool,
     pub gm_command_allowlist: Option<Vec<String>>,
+    pub acore_logs_dir: Option<String>,
 }
 
 #[derive(Clone)]
@@ -339,6 +340,17 @@ pub struct ModifyMoneyRequest {
 pub struct SetLevelRequest {
     pub character_name: String,
     pub level: u8,
+}
+
+#[derive(Deserialize)]
+pub struct LogTailQuery {
+    pub lines: Option<u32>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct LogTailResponse {
+    pub file: String,
+    pub lines: Vec<String>,
 }
 
 #[derive(Serialize, ToSchema)]

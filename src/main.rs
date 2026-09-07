@@ -63,6 +63,10 @@ async fn build_state() -> AppResult<AppState> {
         soap: build_soap_config(),
         gm_command_enabled: parse_bool_env_with_default("WOW_ENABLE_GM_COMMANDS", false),
         gm_command_allowlist: build_gm_command_allowlist(),
+        acore_logs_dir: env::var("AZEROTH_CORE_LOGS_DIR")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
     };
 
     // Validate DB names to prevent SQL identifier injection via config.

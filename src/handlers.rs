@@ -45,6 +45,8 @@ use serde_json::json;
         admin_give_item_handler,
         admin_modify_money_handler,
         admin_set_level_handler,
+        admin_server_logs_handler,
+        admin_server_crashes_handler,
     ),
     components(
         schemas(
@@ -75,6 +77,7 @@ use serde_json::json;
             GiveItemRequest,
             ModifyMoneyRequest,
             SetLevelRequest,
+            LogTailResponse,
         )
     ),
     tags(
@@ -164,7 +167,12 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/v1/admin/players/items", post(admin_give_item_handler))
         .route("/v1/admin/players/money", post(admin_modify_money_handler))
-        .route("/v1/admin/players/level", post(admin_set_level_handler));
+        .route("/v1/admin/players/level", post(admin_set_level_handler))
+        .route("/v1/admin/server/logs", get(admin_server_logs_handler))
+        .route(
+            "/v1/admin/server/crashes",
+            get(admin_server_crashes_handler),
+        );
 
     let public = if debug_enabled {
         public.route("/debug/diagnostics", get(diagnostics_handler))
@@ -946,6 +954,115 @@ fn validate_location_name(location: &str) -> Result<String, ApiError> {
         ));
     }
     Ok(location.to_string())
+}
+
+pub(crate) fn read_tail_lines(
+    path: &std::path::Path,
+    max_lines: usize,
+    max_bytes: u64,
+) -> std::io::Result<Vec<String>> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let read_len = len.min(max_bytes);
+    file.seek(SeekFrom::End(-(read_len as i64)))?;
+    let mut buf = vec![0u8; read_len as usize];
+    file.read_exact(&mut buf)?;
+    let text = String::from_utf8_lossy(&buf);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if read_len < len && !lines.is_empty() {
+        lines.remove(0);
+    }
+    let start = lines.len().saturating_sub(max_lines);
+    Ok(lines[start..].iter().map(|l| l.to_string()).collect())
+}
+
+fn logs_dir_or_503(state: &AppState) -> Result<&str, ApiError> {
+    state.config.acore_logs_dir.as_deref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "AzerothCore logs directory is not configured",
+            "LOGS_NOT_CONFIGURED",
+        )
+    })
+}
+
+async fn serve_log_tail(
+    state: &AppState,
+    file_name: &str,
+    lines: u32,
+) -> Result<Json<LogTailResponse>, ApiError> {
+    if lines == 0 || lines > 1_000 {
+        return Err(ApiError::bad_request(
+            "lines must be between 1 and 1000",
+            "INVALID_LINES",
+        ));
+    }
+
+    let dir = logs_dir_or_503(state)?;
+    let path = std::path::Path::new(dir).join(file_name);
+    let log_lines = read_tail_lines(&path, lines as usize, 512 * 1024).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            ApiError::not_found("Log file not found", "LOG_FILE_NOT_FOUND")
+                .with_extra(json!({ "file": file_name }))
+        } else {
+            ApiError::internal("Failed to read log file", "LOG_READ_FAILED").with_extra(json!({
+                "error": err.to_string()
+            }))
+        }
+    })?;
+
+    Ok(Json(LogTailResponse {
+        file: file_name.to_string(),
+        lines: log_lines,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/admin/server/logs",
+    responses(
+        (status = 200, description = "WorldServer log tail", body = LogTailResponse),
+        (status = 400, description = "Invalid lines", body = ErrorResponse),
+        (status = 403, description = "Requires server:read", body = ErrorResponse),
+        (status = 404, description = "Log file not found", body = ErrorResponse),
+        (status = 503, description = "Logs directory not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_server_logs_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<LogTailQuery>,
+) -> Result<Json<LogTailResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    require_permission(&auth, "server:read")?;
+
+    serve_log_tail(&state, "Server.log", query.lines.unwrap_or(200)).await
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/admin/server/crashes",
+    responses(
+        (status = 200, description = "WorldServer crash log tail", body = LogTailResponse),
+        (status = 400, description = "Invalid lines", body = ErrorResponse),
+        (status = 403, description = "Requires server:read", body = ErrorResponse),
+        (status = 404, description = "Crash log not found", body = ErrorResponse),
+        (status = 503, description = "Logs directory not configured", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_server_crashes_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<LogTailQuery>,
+) -> Result<Json<LogTailResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    require_permission(&auth, "server:read")?;
+
+    serve_log_tail(&state, "Crash.log", query.lines.unwrap_or(200)).await
 }
 
 fn money_format(copper: i64) -> String {
