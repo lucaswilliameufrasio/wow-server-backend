@@ -553,6 +553,22 @@ fn test_state(
     items: MockItemRepo,
     refresh_tokens: MockRefreshTokenRepo,
 ) -> AppState {
+    test_state_with_audit(
+        accounts,
+        characters,
+        items,
+        refresh_tokens,
+        MockAuditRepo::new(),
+    )
+}
+
+fn test_state_with_audit(
+    accounts: MockAccountRepo,
+    characters: MockCharacterRepo,
+    items: MockItemRepo,
+    refresh_tokens: MockRefreshTokenRepo,
+    audit: MockAuditRepo,
+) -> AppState {
     AppState {
         config: AppConfig {
             auth_db: "acore_auth".to_string(),
@@ -568,6 +584,7 @@ fn test_state(
         items: std::sync::Arc::new(items),
         refresh_tokens: std::sync::Arc::new(refresh_tokens),
         service_tokens: std::sync::Arc::new(MockServiceTokenRepo::new()),
+        audit: std::sync::Arc::new(audit),
         started_at: 0,
     }
 }
@@ -2076,11 +2093,12 @@ async fn integration_refresh_token_store_find_revoke() {
         characters: Arc::new(MockCharacterRepo::new()),
         items: Arc::new(MockItemRepo::new()),
         refresh_tokens: Arc::new(LiveRefreshTokenRepo::new(
-            pool,
+            pool.clone(),
             jwt.refresh_expires_days,
             jwt.expires_minutes,
         )),
         service_tokens: Arc::new(MockServiceTokenRepo::new()),
+        audit: Arc::new(LiveAuditRepo::new(pool)),
         started_at: 0,
     };
 
@@ -2174,11 +2192,12 @@ async fn integration_access_token_revocation_roundtrip() {
         characters: Arc::new(MockCharacterRepo::new()),
         items: Arc::new(MockItemRepo::new()),
         refresh_tokens: Arc::new(LiveRefreshTokenRepo::new(
-            pool,
+            pool.clone(),
             jwt.refresh_expires_days,
             jwt.expires_minutes,
         )),
         service_tokens: Arc::new(MockServiceTokenRepo::new()),
+        audit: Arc::new(LiveAuditRepo::new(pool)),
         started_at: 0,
     };
 
@@ -2485,4 +2504,338 @@ async fn main_router_no_longer_serves_metrics() {
         .expect("response");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+// ---------------------------------------------------------------------------
+// Mock AuditRepo
+// ---------------------------------------------------------------------------
+
+struct MockAuditRepo {
+    entries: Arc<Mutex<Vec<AuditEntryNew>>>,
+}
+
+impl MockAuditRepo {
+    fn new() -> Self {
+        Self {
+            entries: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+#[async_trait]
+impl AuditRepo for MockAuditRepo {
+    async fn insert(&self, entry: AuditEntryNew) -> Result<(), ApiError> {
+        self.entries.lock().unwrap().push(entry);
+        Ok(())
+    }
+
+    async fn list(&self, limit: u32, before_id: Option<i64>) -> Result<Vec<AuditLogRow>, ApiError> {
+        let entries = self.entries.lock().unwrap();
+        let mut rows: Vec<AuditLogRow> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| AuditLogRow {
+                id: (i + 1) as i64,
+                actor_account_id: e.actor_account_id,
+                action: e.action.clone(),
+                target_type: e.target_type.clone(),
+                target_id: e.target_id.clone(),
+                details: e.details.clone(),
+                created_at_unix: 0,
+            })
+            .collect();
+        rows.sort_by_key(|r| std::cmp::Reverse(r.id));
+        Ok(rows
+            .into_iter()
+            .filter(|r| before_id.is_none_or(|b| r.id < b))
+            .take(limit as usize)
+            .collect())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Audit log tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn lock_player_denied_writes_audit() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 2,
+        username: "PLAYER2".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(2, 0);
+    let audit = MockAuditRepo::new();
+    let shared = audit.entries.clone();
+    let state = test_state_with_audit(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+        audit,
+    );
+    let jwt = issue_test_token(&state.jwt, 2, "PLAYER2", 0);
+    let app = build_router(state);
+    let payload = json!({ "locked": true }).to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/v1/admin/players/5/lock")
+                .header(AUTHORIZATION, format!("Bearer {jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let entries = shared.lock().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].action, "account.lock");
+    assert_eq!(entries[0].target_id.as_deref(), Some("5"));
+    assert_eq!(entries[0].details.as_ref().unwrap()["denied"], true);
+}
+
+#[tokio::test]
+async fn lock_player_success_writes_audit_with_reason() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 5,
+        username: "TROUBLEMAKER".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.add_account(SignInAccountRow {
+        id: 1,
+        username: "ADMIN".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(1, 3);
+    let audit = MockAuditRepo::new();
+    let shared = audit.entries.clone();
+    let state = test_state_with_audit(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+        audit,
+    );
+    let admin_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    let app = build_router(state);
+    let payload = json!({ "locked": true, "reason": "gold farming" }).to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/v1/admin/players/5/lock")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .header("content-type", "application/json")
+                .body(Body::from(payload))
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let entries = shared.lock().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].action, "account.lock");
+    assert_eq!(entries[0].details.as_ref().unwrap()["locked"], true);
+    assert_eq!(
+        entries[0].details.as_ref().unwrap()["reason"],
+        "gold farming"
+    );
+    assert_eq!(
+        entries[0].details.as_ref().unwrap()["actor_username"],
+        "ADMIN"
+    );
+}
+
+#[tokio::test]
+async fn audit_log_endpoint_requires_admin() {
+    let accounts = MockAccountRepo::new();
+    accounts.add_account(SignInAccountRow {
+        id: 2,
+        username: "PLAYER2".to_string(),
+        email: None,
+        salt: vec![0; 32],
+        verifier: vec![0; 32],
+        locked: false,
+    });
+    accounts.set_gm_level(2, 0);
+    let state = test_state(
+        accounts,
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+    );
+    let jwt = issue_test_token(&state.jwt, 2, "PLAYER2", 0);
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/audit-log")
+                .header(AUTHORIZATION, format!("Bearer {jwt}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn audit_log_lists_entries_with_cursor() {
+    let audit = MockAuditRepo::new();
+    audit
+        .insert(AuditEntryNew {
+            actor_account_id: 1,
+            action: "account.lock".to_string(),
+            target_type: "account".to_string(),
+            target_id: Some("5".to_string()),
+            details: Some(json!({ "locked": true })),
+        })
+        .await
+        .unwrap();
+    audit
+        .insert(AuditEntryNew {
+            actor_account_id: 1,
+            action: "service_token.create".to_string(),
+            target_type: "service_token".to_string(),
+            target_id: Some("1".to_string()),
+            details: Some(json!({ "name": "mcp" })),
+        })
+        .await
+        .unwrap();
+
+    let state = test_state_with_audit(
+        {
+            let accounts = MockAccountRepo::new();
+            accounts.add_account(SignInAccountRow {
+                id: 1,
+                username: "ADMIN".to_string(),
+                email: None,
+                salt: vec![0; 32],
+                verifier: vec![0; 32],
+                locked: false,
+            });
+            accounts.set_gm_level(1, 3);
+            accounts
+        },
+        MockCharacterRepo::new(),
+        MockItemRepo::new(),
+        MockRefreshTokenRepo::new(),
+        audit,
+    );
+    let admin_jwt = issue_test_token(&state.jwt, 1, "ADMIN", 3);
+    let app = build_router(state);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/audit-log?limit=1")
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(body["entries"][0]["action"], "service_token.create");
+    let first_id = body["entries"][0]["id"].as_i64().unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/admin/audit-log?cursor={first_id}"))
+                .header(AUTHORIZATION, format!("Bearer {admin_jwt}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response).await;
+    assert_eq!(body["entries"][0]["action"], "account.lock");
+}
+
+#[tokio::test]
+async fn integration_audit_repo_roundtrip() {
+    use testcontainers::runners::AsyncRunner;
+
+    let pg_image = testcontainers_modules::postgres::Postgres::default();
+    let container: testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres> =
+        match pg_image.start().await {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("testcontainers skipped (Docker unavailable?): {e}");
+                return;
+            }
+        };
+
+    let host = container.get_host().await.expect("container host");
+    let port = container
+        .get_host_port_ipv4(5432)
+        .await
+        .expect("container port");
+    let database_url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await
+        .expect("pg pool");
+
+    crate::run_app_migrations(&pool).await.expect("migrations");
+
+    let repo = LiveAuditRepo::new(pool);
+    repo.insert(AuditEntryNew {
+        actor_account_id: 1,
+        action: "account.lock".to_string(),
+        target_type: "account".to_string(),
+        target_id: Some("5".to_string()),
+        details: Some(json!({ "locked": true })),
+    })
+    .await
+    .expect("insert");
+
+    repo.insert(AuditEntryNew {
+        actor_account_id: 2,
+        action: "service_token.create".to_string(),
+        target_type: "service_token".to_string(),
+        target_id: None,
+        details: None,
+    })
+    .await
+    .expect("insert");
+
+    let all = repo.list(10, None).await.expect("list");
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].action, "service_token.create");
+
+    let filtered = repo.list(10, Some(all[0].id)).await.expect("list cursor");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].action, "account.lock");
 }

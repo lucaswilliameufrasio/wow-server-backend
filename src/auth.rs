@@ -172,6 +172,7 @@ pub fn build_rbac_policy(gm_level: u8) -> RbacPolicy {
         roles.push("admin".to_string());
         permissions.insert("players:write".to_string());
         permissions.insert("tokens:manage".to_string());
+        permissions.insert("audit:read".to_string());
     }
 
     RbacPolicy {

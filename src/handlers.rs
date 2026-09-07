@@ -19,6 +19,7 @@ use crate::metrics;
 use crate::middleware::*;
 use crate::models::*;
 use crate::repos::*;
+use serde_json::json;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -28,6 +29,11 @@ use crate::repos::*;
         sign_in_handler,
         refresh_token_handler,
         diagnostics_handler,
+        admin_lock_player_handler,
+        admin_create_service_token_handler,
+        admin_list_service_tokens_handler,
+        admin_revoke_service_token_handler,
+        admin_audit_log_handler,
     ),
     components(
         schemas(
@@ -42,6 +48,11 @@ use crate::repos::*;
             CreateServiceTokenResponse,
             ServiceTokenSummary,
             ServiceTokenListResponse,
+            SetAccountLockRequest,
+            AccountLockResponse,
+            AuditLogQuery,
+            AuditLogEntry,
+            AuditLogListResponse,
         )
     ),
     tags(
@@ -110,7 +121,8 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/admin/service-tokens/{token_id}",
             delete(admin_revoke_service_token_handler),
-        );
+        )
+        .route("/v1/admin/audit-log", get(admin_audit_log_handler));
 
     let public = if debug_enabled {
         public.route("/debug/diagnostics", get(diagnostics_handler))
@@ -167,6 +179,61 @@ pub fn build_router(state: AppState) -> Router {
                 ]),
         )
         .fallback(not_found_handler)
+}
+
+async fn write_audit(
+    state: &AppState,
+    auth: &AuthContext,
+    action: &str,
+    target_type: &str,
+    target_id: Option<&str>,
+    details: serde_json::Value,
+) {
+    let actor = i64::try_from(auth.account_id).unwrap_or(0);
+    let mut details = details;
+    if let Some(obj) = details.as_object_mut() {
+        obj.insert("actor_username".to_string(), json!(auth.username));
+    }
+
+    let entry = crate::repos::AuditEntryNew {
+        actor_account_id: actor,
+        action: action.to_string(),
+        target_type: target_type.to_string(),
+        target_id: target_id.map(|v| v.to_string()),
+        details: Some(details),
+    };
+
+    if let Err(err) = state.audit.insert(entry).await {
+        tracing::warn!(error = ?err, "failed to write audit log entry");
+    }
+}
+
+async fn require_permission_audited(
+    state: &AppState,
+    auth: &AuthContext,
+    permission: &str,
+    action: &str,
+    target_type: &str,
+    target_id: Option<&str>,
+) -> Result<(), ApiError> {
+    if has_permission(auth, permission) {
+        return Ok(());
+    }
+
+    write_audit(
+        state,
+        auth,
+        action,
+        target_type,
+        target_id,
+        json!({ "denied": true }),
+    )
+    .await;
+
+    Err(ApiError::forbidden(
+        "You are not allowed to perform this action",
+        "RBAC_FORBIDDEN",
+    ))
 }
 
 pub fn build_metrics_router() -> Router {
@@ -561,6 +628,17 @@ async fn admin_player_locations_handler(
     }))
 }
 
+#[utoipa::path(
+    patch,
+    path = "/v1/admin/players/{account_id}/lock",
+    request_body = SetAccountLockRequest,
+    responses(
+        (status = 200, description = "Account lock updated", body = AccountLockResponse),
+        (status = 403, description = "Requires players:write", body = ErrorResponse),
+        (status = 404, description = "Account not found", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
 async fn admin_lock_player_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -568,7 +646,15 @@ async fn admin_lock_player_handler(
     Json(body): Json<SetAccountLockRequest>,
 ) -> Result<Json<AccountLockResponse>, ApiError> {
     let auth = authenticate(&headers, &state).await?;
-    require_permission(&auth, "players:write")?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "players:write",
+        "account.lock",
+        "account",
+        Some(&account_id.to_string()),
+    )
+    .await?;
 
     let updated = state.accounts.update_lock(account_id, body.locked).await?;
 
@@ -578,6 +664,20 @@ async fn admin_lock_player_handler(
             "ACCOUNT_NOT_FOUND",
         ));
     }
+
+    let mut details = json!({ "locked": body.locked });
+    if let Some(reason) = body.reason.as_deref().filter(|r| !r.trim().is_empty()) {
+        details["reason"] = json!(reason);
+    }
+    write_audit(
+        &state,
+        &auth,
+        "account.lock",
+        "account",
+        Some(&account_id.to_string()),
+        details,
+    )
+    .await;
 
     Ok(Json(AccountLockResponse {
         account_id,
@@ -774,7 +874,15 @@ async fn admin_revoke_service_token_handler(
     Path(token_id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     let auth = authenticate(&headers, &state).await?;
-    require_permission(&auth, "tokens:manage")?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "tokens:manage",
+        "service_token.revoke",
+        "service_token",
+        Some(&token_id.to_string()),
+    )
+    .await?;
 
     let revoked = state.service_tokens.revoke(token_id).await?;
 
@@ -785,5 +893,55 @@ async fn admin_revoke_service_token_handler(
         ));
     }
 
+    write_audit(
+        &state,
+        &auth,
+        "service_token.revoke",
+        "service_token",
+        Some(&token_id.to_string()),
+        json!({ "token_id": token_id }),
+    )
+    .await;
+
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/admin/audit-log",
+    responses(
+        (status = 200, description = "Recent audit log entries", body = AuditLogListResponse),
+        (status = 403, description = "Requires audit:read", body = ErrorResponse),
+    ),
+    tag = "admin"
+)]
+async fn admin_audit_log_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AuditLogQuery>,
+) -> Result<Json<AuditLogListResponse>, ApiError> {
+    let auth = authenticate(&headers, &state).await?;
+    require_permission(&auth, "audit:read")?;
+
+    let limit = query.limit.unwrap_or(50).min(200);
+    let rows = state.audit.list(limit, query.cursor).await?;
+
+    let entries = rows
+        .into_iter()
+        .map(|row| AuditLogEntry {
+            id: row.id,
+            actor_account_id: u64::try_from(row.actor_account_id).unwrap_or(0),
+            action: row.action,
+            target_type: row.target_type,
+            target_id: row.target_id,
+            details: row.details,
+            created_at_unix: u64::try_from(row.created_at_unix).unwrap_or(0),
+        })
+        .collect();
+
+    Ok(Json(AuditLogListResponse {
+        limit,
+        cursor: query.cursor,
+        entries,
+    }))
 }

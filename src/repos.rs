@@ -151,6 +151,7 @@ pub struct AppState {
     pub items: Arc<dyn ItemRepo>,
     pub refresh_tokens: Arc<dyn RefreshTokenRepo>,
     pub service_tokens: Arc<dyn ServiceTokenRepo>,
+    pub audit: Arc<dyn AuditRepo>,
     pub started_at: u64,
 }
 
@@ -1171,5 +1172,109 @@ impl ServiceTokenRepo for LiveServiceTokenRepo {
             .map_err(|err| map_db_error("failed to update service token last used", err))?;
 
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AuditRepo
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct AuditEntryNew {
+    pub actor_account_id: i64,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: Option<String>,
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditLogRow {
+    pub id: i64,
+    pub actor_account_id: i64,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: Option<String>,
+    pub details: Option<serde_json::Value>,
+    pub created_at_unix: i64,
+}
+
+#[async_trait]
+pub trait AuditRepo: Send + Sync {
+    async fn insert(&self, entry: AuditEntryNew) -> Result<(), ApiError>;
+    async fn list(&self, limit: u32, before_id: Option<i64>) -> Result<Vec<AuditLogRow>, ApiError>;
+}
+
+pub struct LiveAuditRepo {
+    pool: PgPool,
+}
+
+impl LiveAuditRepo {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl AuditRepo for LiveAuditRepo {
+    async fn insert(&self, entry: AuditEntryNew) -> Result<(), ApiError> {
+        let sql = format!(
+            "INSERT INTO {}.admin_audit_log \
+             (actor_account_id, action, target_type, target_id, details) \
+             VALUES ($1, $2, $3, $4, $5)",
+            APP_PG_SCHEMA
+        );
+
+        sqlx::query(&sql)
+            .bind(entry.actor_account_id)
+            .bind(entry.action)
+            .bind(entry.target_type)
+            .bind(entry.target_id)
+            .bind(entry.details)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| map_db_error("failed to write audit log", err))?;
+
+        Ok(())
+    }
+
+    async fn list(&self, limit: u32, before_id: Option<i64>) -> Result<Vec<AuditLogRow>, ApiError> {
+        let sql = format!(
+            "SELECT id, actor_account_id, action, target_type, target_id, details, \
+             EXTRACT(EPOCH FROM created_at)::BIGINT AS created_at_unix \
+             FROM {}.admin_audit_log \
+             WHERE ($1::BIGINT IS NULL OR id < $1) \
+             ORDER BY id DESC LIMIT $2",
+            APP_PG_SCHEMA
+        );
+
+        let rows = sqlx::query(&sql)
+            .bind(before_id)
+            .bind(i32::try_from(limit).unwrap_or(200))
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| map_db_error("failed to list audit log", err))?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(AuditLogRow {
+                    id: row.try_get("id").map_err(|_| {
+                        ApiError::internal("Invalid database row format", "ROW_DECODE_FAILED")
+                    })?,
+                    actor_account_id: row.try_get("actor_account_id").map_err(|_| {
+                        ApiError::internal("Invalid database row format", "ROW_DECODE_FAILED")
+                    })?,
+                    action: row.try_get("action").map_err(|_| {
+                        ApiError::internal("Invalid database row format", "ROW_DECODE_FAILED")
+                    })?,
+                    target_type: row.try_get("target_type").map_err(|_| {
+                        ApiError::internal("Invalid database row format", "ROW_DECODE_FAILED")
+                    })?,
+                    target_id: row.try_get("target_id").unwrap_or(None),
+                    details: row.try_get("details").unwrap_or(None),
+                    created_at_unix: row.try_get::<i64, _>("created_at_unix").unwrap_or(0),
+                })
+            })
+            .collect()
     }
 }

@@ -200,12 +200,13 @@ pub struct AdminAccountLocationsResponse {
     pub locations: Vec<CharacterLocationResponse>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct SetAccountLockRequest {
     pub locked: bool,
+    pub reason: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct AccountLockResponse {
     pub account_id: u64,
     pub locked: bool,
@@ -246,6 +247,30 @@ pub struct ServiceTokenSummary {
 #[derive(Serialize, ToSchema)]
 pub struct ServiceTokenListResponse {
     pub tokens: Vec<ServiceTokenSummary>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct AuditLogQuery {
+    pub limit: Option<u32>,
+    pub cursor: Option<i64>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct AuditLogEntry {
+    pub id: i64,
+    pub actor_account_id: u64,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: Option<String>,
+    pub details: Option<serde_json::Value>,
+    pub created_at_unix: u64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct AuditLogListResponse {
+    pub limit: u32,
+    pub cursor: Option<i64>,
+    pub entries: Vec<AuditLogEntry>,
 }
 
 #[derive(Deserialize)]

@@ -20,8 +20,8 @@ use crate::handlers::{build_metrics_router, build_router};
 use error::AppError;
 use models::{AppConfig, JwtConfig};
 use repos::{
-    AppState, LiveAccountRepo, LiveCharacterRepo, LiveItemRepo, LiveRefreshTokenRepo,
-    LiveServiceTokenRepo,
+    AppState, LiveAccountRepo, LiveAuditRepo, LiveCharacterRepo, LiveItemRepo,
+    LiveRefreshTokenRepo, LiveServiceTokenRepo,
 };
 
 #[tokio::main]
@@ -91,7 +91,8 @@ async fn build_state() -> AppResult<AppState> {
             jwt.refresh_expires_days,
             jwt.expires_minutes,
         )),
-        service_tokens: Arc::new(LiveServiceTokenRepo::new(app_pool)),
+        service_tokens: Arc::new(LiveServiceTokenRepo::new(app_pool.clone())),
+        audit: Arc::new(LiveAuditRepo::new(app_pool)),
     })
 }
 
