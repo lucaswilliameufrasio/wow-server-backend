@@ -205,6 +205,24 @@ pub async fn spawn() -> String {
             }),
         )
         .route(
+            "/v1/admin/server/logs",
+            get(|| async {
+                Json(json!({
+                    "file": "Server.log",
+                    "lines": ["2026-09-07 03:32:00 Worldserver: restart scheduled", "2026-09-07 03:47:00 Worldserver: shutting down"]
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/server/crashes",
+            get(|| async {
+                Json(json!({
+                    "file": "Crash.log",
+                    "lines": ["2026-09-07 03:31:58 Crash: sigsegv in Map::Update"]
+                }))
+            }),
+        )
+        .route(
             "/v1/admin/players/teleport",
             post(|| async {
                 Json(json!({

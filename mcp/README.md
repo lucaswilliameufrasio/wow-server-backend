@@ -30,6 +30,8 @@ Baseado no SDK oficial [rmcp](https://github.com/modelcontextprotocol/rust-sdk) 
 | `modify_money` | SOAP `modify money name` via API (requer `players:modify`, destructive + dry_run) |
 | `set_level` | SOAP `setlevel name` via API (requer `players:modify`, destructive + dry_run) |
 | `run_gm_command` | SOAP raw via API — **desabilitada por padrão** (ver abaixo) |
+| `get_server_logs` | tail de `Server.log` via API (requer `server:read` + `AZEROTH_CORE_LOGS_DIR`) |
+| `get_crashes` | tail de `Crash.log` via API (requer `server:read` + `AZEROTH_CORE_LOGS_DIR`) |
 
 Tools read-only têm `read_only_hint = true`; mutações destrutivas (`lock_account`,
 `kick_player`, `ban_account`, `schedule_restart`, `run_gm_command`) exigem
@@ -140,6 +142,7 @@ printf '%s\n' \
 - "Bane a conta Cheater por 7 dias por exploits." (pede confirmação via dry_run)
 - "Teleporta o Xerath para Stormwind City e dá 2 Thunderfury." (pede confirmação)
 - "Adiciona 1000 gold pro Uther e sobe pra 80." (pede confirmação)
+- "Mostra as últimas 100 linhas do log do worldserver e os últimos crashes."
 
 ## Registro por cliente
 

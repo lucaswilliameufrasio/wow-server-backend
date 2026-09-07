@@ -102,3 +102,9 @@ pub struct SoapCommandResponse {
     pub command: String,
     pub result: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogTailResponse {
+    pub file: String,
+    pub lines: Vec<String>,
+}

@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::api_client::{ApiClient, ApiError};
 use crate::dto::{
     AccountLockResponse, AdminAccountLocationsResponse, AdminPlayersResponse, AuditLogListResponse,
-    HealthCheckResponse, ItemListResponse, ItemSummary, OnlinePlayerSummary, SoapCommandResponse,
+    HealthCheckResponse, ItemListResponse, ItemSummary, LogTailResponse, OnlinePlayerSummary,
+    SoapCommandResponse,
 };
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -127,6 +128,12 @@ pub struct GmCommandArgs {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ServerStatusArgs {}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LogTailArgs {
+    #[schemars(description = "Number of trailing lines to return (1-1000, default 200)")]
+    pub lines: Option<u32>,
+}
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct TeleportPlayerArgs {
@@ -293,6 +300,34 @@ impl WowMcp {
     async fn get_health(&self) -> Result<CallToolResult, McpError> {
         match self.fetch_health().await {
             Ok(health) => Ok(json_result(&health)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Get the last lines of the worldserver Server.log. Requires the backend to have AZEROTH_CORE_LOGS_DIR configured.",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_server_logs(
+        &self,
+        Parameters(LogTailArgs { lines }): Parameters<LogTailArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.fetch_server_logs(lines).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Get the last lines of the worldserver Crash.log. Requires the backend to have AZEROTH_CORE_LOGS_DIR configured.",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_crashes(
+        &self,
+        Parameters(LogTailArgs { lines }): Parameters<LogTailArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.fetch_crashes(lines).await {
+            Ok(response) => Ok(json_result(&response)),
             Err(err) => Ok(api_tool_error(err)),
         }
     }
@@ -829,6 +864,26 @@ impl WowMcp {
             .await
     }
 
+    pub async fn fetch_server_logs(&self, lines: Option<u32>) -> Result<LogTailResponse, ApiError> {
+        let mut query: Vec<(&str, String)> = Vec::new();
+        if let Some(v) = lines {
+            query.push(("lines", v.to_string()));
+        }
+        self.api
+            .get_json_with_query("/v1/admin/server/logs", &query)
+            .await
+    }
+
+    pub async fn fetch_crashes(&self, lines: Option<u32>) -> Result<LogTailResponse, ApiError> {
+        let mut query: Vec<(&str, String)> = Vec::new();
+        if let Some(v) = lines {
+            query.push(("lines", v.to_string()));
+        }
+        self.api
+            .get_json_with_query("/v1/admin/server/crashes", &query)
+            .await
+    }
+
     pub async fn fetch_teleport(
         &self,
         character_name: &str,
@@ -1333,6 +1388,19 @@ mod tests {
 
         let level = mcp.fetch_set_level("Xerath", 80).await.unwrap();
         assert!(level.command.contains("setlevel name Xerath 80"));
+    }
+
+    #[tokio::test]
+    async fn server_logs_and_crashes_fetch() {
+        let base = mock::spawn().await;
+        let mcp = client(&base);
+
+        let logs = mcp.fetch_server_logs(Some(50)).await.unwrap();
+        assert_eq!(logs.file, "Server.log");
+        assert!(logs.lines[0].contains("restart"));
+
+        let crashes = mcp.fetch_crashes(None).await.unwrap();
+        assert_eq!(crashes.file, "Crash.log");
     }
 
     #[tokio::test]

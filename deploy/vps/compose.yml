@@ -48,11 +48,17 @@ services:
       AZEROTH_CORE_SOAP_PASSWORD: ${WOW_SOAP_PASSWORD:-}
       WOW_ENABLE_GM_COMMANDS: ${WOW_ENABLE_GM_COMMANDS:-false}
       RUST_LOG: ${WOW_RUST_LOG:-info}
+      # Optional: worldserver log tail endpoints (/v1/admin/server/logs|crashes).
+      # Uncomment both this env and the volume below, pointing WOW_ACORE_LOGS_DIR
+      # at the host directory that holds Server.log/Crash.log.
+      # AZEROTH_CORE_LOGS_DIR: /logs/acore
     secrets:
       - source: jwt_private
         target: jwt_private.pem
       - source: jwt_public
         target: jwt_public.pem
+    # volumes:
+    #   - ${WOW_ACORE_LOGS_DIR:?Set WOW_ACORE_LOGS_DIR}:/logs/acore:ro
     networks:
       - wow-shared
       - wow-acore

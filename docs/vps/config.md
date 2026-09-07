@@ -67,6 +67,7 @@ ports:
 | `WOW_SRP6_CORE5_MODE` | `false` | Formato do verifier SRP6. `false` = AzerothCore master (padrão); `true` = formato "core 5" de outros cores. Ver [SRP6](#srp6-e-criacao-de-contas) |
 | `WOW_ENABLE_GM_COMMANDS` | `false` | **Perigoso**: habilita `POST /v1/admin/server/command` (GM raw). Mantenha off |
 | `WOW_GM_COMMAND_ALLOWLIST` | — | Prefixos de comando permitidos, separados por vírgula (ex.: `server info,reload config`) |
+| `AZEROTH_CORE_LOGS_DIR` | — | Diretório com `Server.log`/`Crash.log` para os endpoints de log tail (opt-in) |
 | `WOW_JWT_ISSUER` | `wow-backend` | Emissor JWT |
 | `WOW_JWT_AUDIENCE` | `wow-web` | Audiência JWT |
 | `WOW_JWT_EXPIRES_MINUTES` | `15` | Expiração do access token |
