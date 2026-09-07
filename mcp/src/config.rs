@@ -3,6 +3,7 @@ pub struct Config {
     pub metrics_base_url: String,
     pub api_token: Option<String>,
     pub request_timeout_secs: u64,
+    pub gm_commands_enabled: bool,
 }
 
 impl Config {
@@ -30,11 +31,16 @@ impl Config {
             return Err("MCP_METRICS_BASE_URL is empty".to_string());
         }
 
+        let gm_commands_enabled = std::env::var("MCP_ENABLE_GM_COMMANDS")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+            .unwrap_or(false);
+
         Ok(Self {
             api_base_url,
             metrics_base_url,
             api_token,
             request_timeout_secs,
+            gm_commands_enabled,
         })
     }
 }
@@ -62,6 +68,7 @@ mod tests {
         assert_eq!(config.metrics_base_url, "http://127.0.0.1:9090");
         assert!(config.api_token.is_none());
         assert_eq!(config.request_timeout_secs, 30);
+        assert!(!config.gm_commands_enabled);
     }
 
     #[test]

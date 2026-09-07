@@ -85,6 +85,18 @@ impl ApiClient {
             .map_err(ApiError::Transport)
     }
 
+    pub async fn post_json<T: DeserializeOwned, B: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T, ApiError> {
+        self.send_with_body(path, reqwest::Method::POST, Some(body), None)
+            .await?
+            .json()
+            .await
+            .map_err(ApiError::Transport)
+    }
+
     pub async fn patch_json<T: DeserializeOwned, B: serde::Serialize>(
         &self,
         path: &str,

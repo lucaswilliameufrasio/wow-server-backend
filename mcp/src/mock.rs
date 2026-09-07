@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     http::StatusCode,
-    routing::{get, patch},
+    routing::{get, patch, post},
 };
 use serde_json::json;
 
@@ -138,6 +138,69 @@ pub async fn spawn() -> String {
                         "details": {"locked": true, "actor_username": "ADMIN"},
                         "created_at_unix": 1700001000
                     }]
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/server/status",
+            post(|| async {
+                Json(json!({
+                    "command": "server info",
+                    "result": "Online connections: 3. Uptime: 2h."
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/server/announce",
+            post(|| async {
+                Json(json!({
+                    "command": "announce test",
+                    "result": "Announcement sent by console."
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/server/restart",
+            post(|| async {
+                Json(json!({
+                    "command": "server restart 60",
+                    "result": "Server restart scheduled in 60 seconds."
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/server/command",
+            post(|| async {
+                Json(json!({
+                    "command": "server info",
+                    "result": "Online connections: 3. Uptime: 2h."
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/players/kick",
+            post(|| async {
+                Json(json!({
+                    "command": "kick Xerath",
+                    "result": "Player Xerath kicked by console."
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/accounts/ban",
+            post(|| async {
+                Json(json!({
+                    "command": "ban account Cheater 7d exploits",
+                    "result": "Account Cheater banned for 7 days."
+                }))
+            }),
+        )
+        .route(
+            "/v1/admin/accounts/unban",
+            post(|| async {
+                Json(json!({
+                    "command": "unban account Cheater",
+                    "result": "Account Cheater unbanned."
                 }))
             }),
         );

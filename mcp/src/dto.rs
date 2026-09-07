@@ -96,3 +96,9 @@ pub struct AuditLogListResponse {
     pub cursor: Option<i64>,
     pub entries: Vec<AuditLogEntry>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoapCommandResponse {
+    pub command: String,
+    pub result: String,
+}

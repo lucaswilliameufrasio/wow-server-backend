@@ -65,6 +65,8 @@ ports:
 | `WOW_METRICS_PORT` | `9090` | Porta do servidor de métricas Prometheus (interno, não publicado pelo compose) |
 | `WOW_RUST_LOG` | `info` | Nível de log da API |
 | `WOW_SRP6_CORE5_MODE` | `false` | Formato do verifier SRP6. `false` = AzerothCore master (padrão); `true` = formato "core 5" de outros cores. Ver [SRP6](#srp6-e-criacao-de-contas) |
+| `WOW_ENABLE_GM_COMMANDS` | `false` | **Perigoso**: habilita `POST /v1/admin/server/command` (GM raw). Mantenha off |
+| `WOW_GM_COMMAND_ALLOWLIST` | — | Prefixos de comando permitidos, separados por vírgula (ex.: `server info,reload config`) |
 | `WOW_JWT_ISSUER` | `wow-backend` | Emissor JWT |
 | `WOW_JWT_AUDIENCE` | `wow-web` | Audiência JWT |
 | `WOW_JWT_EXPIRES_MINUTES` | `15` | Expiração do access token |

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::api_client::{ApiClient, ApiError};
 use crate::dto::{
     AccountLockResponse, AdminAccountLocationsResponse, AdminPlayersResponse, AuditLogListResponse,
-    HealthCheckResponse, ItemListResponse, ItemSummary, OnlinePlayerSummary,
+    HealthCheckResponse, ItemListResponse, ItemSummary, OnlinePlayerSummary, SoapCommandResponse,
 };
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -61,6 +61,73 @@ pub struct GetAuditLogArgs {
     pub cursor: Option<i64>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AnnounceArgs {
+    #[schemars(description = "Message broadcast to all players (max 256 chars, single line)")]
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RestartServerArgs {
+    #[schemars(
+        description = "Delay in seconds before the worldserver restarts (1-86400, default 60)"
+    )]
+    pub delay_seconds: Option<u32>,
+    #[schemars(
+        description = "Defaults to true. Run with dry_run=false to actually schedule the restart."
+    )]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct KickPlayerArgs {
+    #[schemars(description = "In-game character name (2-12 letters)")]
+    pub character_name: String,
+    #[schemars(description = "Optional reason recorded in the audit log")]
+    pub reason: Option<String>,
+    #[schemars(
+        description = "Defaults to true. Run with dry_run=false to actually kick the player."
+    )]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct BanAccountArgs {
+    #[schemars(description = "Account name to ban")]
+    pub account: String,
+    #[schemars(description = "Ban duration in days (1-3650)")]
+    pub days: u32,
+    #[schemars(description = "Optional reason recorded in the audit log")]
+    pub reason: Option<String>,
+    #[schemars(
+        description = "Defaults to true. Run with dry_run=false to actually ban the account."
+    )]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UnbanAccountArgs {
+    #[schemars(description = "Account name to unban")]
+    pub account: String,
+    #[schemars(
+        description = "Defaults to true. Run with dry_run=false to actually unban the account."
+    )]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GmCommandArgs {
+    #[schemars(description = "Raw GM command to send to the worldserver (e.g. 'server info')")]
+    pub command: String,
+    #[schemars(
+        description = "Defaults to true. Run with dry_run=false to actually execute the command."
+    )]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ServerStatusArgs {}
+
 fn pretty<T: Serialize>(value: &T) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string())
 }
@@ -77,12 +144,21 @@ fn api_tool_error(err: ApiError) -> CallToolResult {
 pub struct WowMcp {
     api: Arc<ApiClient>,
     metrics_api: Arc<ApiClient>,
+    gm_commands_enabled: bool,
 }
 
 #[tool_router]
 impl WowMcp {
-    pub fn new(api: Arc<ApiClient>, metrics_api: Arc<ApiClient>) -> Self {
-        Self { api, metrics_api }
+    pub fn new(
+        api: Arc<ApiClient>,
+        metrics_api: Arc<ApiClient>,
+        gm_commands_enabled: bool,
+    ) -> Self {
+        Self {
+            api,
+            metrics_api,
+            gm_commands_enabled,
+        }
     }
 
     #[tool(
@@ -169,6 +245,195 @@ impl WowMcp {
     async fn get_health(&self) -> Result<CallToolResult, McpError> {
         match self.fetch_health().await {
             Ok(health) => Ok(json_result(&health)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Get worldserver status via the backend SOAP bridge (server info)",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_server_status(
+        &self,
+        Parameters(ServerStatusArgs {}): Parameters<ServerStatusArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.fetch_server_status().await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Broadcast an announcement to all online players",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    async fn send_announcement(
+        &self,
+        Parameters(AnnounceArgs { message }): Parameters<AnnounceArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        match self.fetch_announce(&message).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Disconnect a player from the worldserver. DESTRUCTIVE: requires explicit confirmation via dry_run=false.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn kick_player(
+        &self,
+        Parameters(KickPlayerArgs {
+            character_name,
+            reason,
+            dry_run,
+        }): Parameters<KickPlayerArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if dry_run.unwrap_or(true) {
+            return Ok(json_result(&serde_json::json!({
+                "dry_run": true,
+                "character_name": character_name,
+                "action": "kick",
+                "next_step": "Call again with dry_run=false to apply this change."
+            })));
+        }
+
+        match self.fetch_kick(&character_name, reason.as_deref()).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Ban an account for a number of days. DESTRUCTIVE: requires explicit confirmation via dry_run=false.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn ban_account(
+        &self,
+        Parameters(BanAccountArgs {
+            account,
+            days,
+            reason,
+            dry_run,
+        }): Parameters<BanAccountArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if dry_run.unwrap_or(true) {
+            return Ok(json_result(&serde_json::json!({
+                "dry_run": true,
+                "account": account,
+                "days": days,
+                "action": "ban",
+                "next_step": "Call again with dry_run=false to apply this change."
+            })));
+        }
+
+        match self.fetch_ban(&account, days, reason.as_deref()).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Remove the ban from an account",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    async fn unban_account(
+        &self,
+        Parameters(UnbanAccountArgs { account, dry_run }): Parameters<UnbanAccountArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if dry_run.unwrap_or(true) {
+            return Ok(json_result(&serde_json::json!({
+                "dry_run": true,
+                "account": account,
+                "action": "unban",
+                "next_step": "Call again with dry_run=false to apply this change."
+            })));
+        }
+
+        match self.fetch_unban(&account).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Schedule a worldserver restart after a delay in seconds. DESTRUCTIVE: requires explicit confirmation via dry_run=false.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn schedule_restart(
+        &self,
+        Parameters(RestartServerArgs {
+            delay_seconds,
+            dry_run,
+        }): Parameters<RestartServerArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if dry_run.unwrap_or(true) {
+            return Ok(json_result(&serde_json::json!({
+                "dry_run": true,
+                "delay_seconds": delay_seconds.unwrap_or(60),
+                "action": "server restart",
+                "next_step": "Call again with dry_run=false to apply this change."
+            })));
+        }
+
+        match self.fetch_restart(delay_seconds).await {
+            Ok(response) => Ok(json_result(&response)),
+            Err(err) => Ok(api_tool_error(err)),
+        }
+    }
+
+    #[tool(
+        description = "Execute a raw GM command on the worldserver. DISABLED unless the MCP was started with MCP_ENABLE_GM_COMMANDS=true AND the backend enables it. DESTRUCTIVE: requires explicit confirmation via dry_run=false.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn run_gm_command(
+        &self,
+        Parameters(GmCommandArgs { command, dry_run }): Parameters<GmCommandArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if !self.gm_commands_enabled {
+            return Ok(CallToolResult::error(vec![ContentBlock::text(
+                "GM command execution is disabled in the MCP (set MCP_ENABLE_GM_COMMANDS=true to enable). The backend also enforces its own flag and allowlist.",
+            )]));
+        }
+
+        if dry_run.unwrap_or(true) {
+            return Ok(json_result(&serde_json::json!({
+                "dry_run": true,
+                "command": command,
+                "next_step": "Call again with dry_run=false to execute this command."
+            })));
+        }
+
+        match self.fetch_gm_command(&command).await {
+            Ok(response) => Ok(json_result(&response)),
             Err(err) => Ok(api_tool_error(err)),
         }
     }
@@ -311,6 +576,78 @@ impl WowMcp {
         self.api.get_json("/health-check").await
     }
 
+    pub async fn fetch_server_status(&self) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json("/v1/admin/server/status", &serde_json::json!({}))
+            .await
+    }
+
+    pub async fn fetch_announce(&self, message: &str) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/server/announce",
+                &serde_json::json!({ "message": message }),
+            )
+            .await
+    }
+
+    pub async fn fetch_restart(
+        &self,
+        delay_seconds: Option<u32>,
+    ) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/server/restart",
+                &serde_json::json!({ "delay_seconds": delay_seconds }),
+            )
+            .await
+    }
+
+    pub async fn fetch_kick(
+        &self,
+        character_name: &str,
+        reason: Option<&str>,
+    ) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/players/kick",
+                &serde_json::json!({ "character_name": character_name, "reason": reason }),
+            )
+            .await
+    }
+
+    pub async fn fetch_ban(
+        &self,
+        account: &str,
+        days: u32,
+        reason: Option<&str>,
+    ) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/accounts/ban",
+                &serde_json::json!({ "account": account, "days": days, "reason": reason }),
+            )
+            .await
+    }
+
+    pub async fn fetch_unban(&self, account: &str) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/accounts/unban",
+                &serde_json::json!({ "account": account }),
+            )
+            .await
+    }
+
+    pub async fn fetch_gm_command(&self, command: &str) -> Result<SoapCommandResponse, ApiError> {
+        self.api
+            .post_json(
+                "/v1/admin/server/command",
+                &serde_json::json!({ "command": command }),
+            )
+            .await
+    }
+
     pub async fn fetch_lock_account(
         &self,
         account_id: u64,
@@ -448,9 +785,13 @@ mod tests {
     use crate::mock;
 
     fn client(base_url: &str) -> WowMcp {
+        client_with_gm(base_url, false)
+    }
+
+    fn client_with_gm(base_url: &str, gm_commands_enabled: bool) -> WowMcp {
         let api = Arc::new(ApiClient::new(base_url.to_string(), None, 5).unwrap());
         let metrics_api = Arc::new(ApiClient::new(base_url.to_string(), None, 5).unwrap());
-        WowMcp::new(api, metrics_api)
+        WowMcp::new(api, metrics_api, gm_commands_enabled)
     }
 
     #[tokio::test]
@@ -508,7 +849,7 @@ mod tests {
     async fn tool_error_when_api_unreachable() {
         let api = Arc::new(ApiClient::new("http://127.0.0.1:1", None, 1).unwrap());
         let metrics_api = Arc::new(ApiClient::new("http://127.0.0.1:1", None, 1).unwrap());
-        let mcp = WowMcp::new(api, metrics_api);
+        let mcp = WowMcp::new(api, metrics_api, false);
         let result = mcp.get_health().await.unwrap();
         assert!(result.is_error.unwrap_or(false));
     }
@@ -581,6 +922,105 @@ mod tests {
         let response = client(&base).fetch_audit_log(Some(10), None).await.unwrap();
         assert_eq!(response.entries.len(), 1);
         assert_eq!(response.entries[0].action, "account.lock");
+    }
+
+    #[tokio::test]
+    async fn server_status_and_announce_call_backend() {
+        let base = mock::spawn().await;
+        let mcp = client(&base);
+
+        let status = mcp.fetch_server_status().await.unwrap();
+        assert!(status.command.contains("server info"));
+
+        let announce = mcp.fetch_announce("reinício em 15 minutos").await.unwrap();
+        assert!(announce.result.contains("Announcement sent"));
+    }
+
+    #[tokio::test]
+    async fn kick_dry_run_never_calls_backend() {
+        let base = mock::spawn().await;
+        let mcp = client(&base);
+        let result = mcp
+            .kick_player(Parameters(KickPlayerArgs {
+                character_name: "Xerath".to_string(),
+                reason: Some("afk arena".to_string()),
+                dry_run: None,
+            }))
+            .await
+            .unwrap();
+        assert!(!result.is_error.unwrap_or(false));
+        assert!(format!("{result:?}").contains("dry_run"));
+    }
+
+    #[tokio::test]
+    async fn kick_confirmed_calls_backend() {
+        let base = mock::spawn().await;
+        let mcp = client(&base);
+        let response = mcp.fetch_kick("Xerath", Some("afk arena")).await.unwrap();
+        assert!(response.command.contains("kick Xerath"));
+    }
+
+    #[tokio::test]
+    async fn ban_confirmed_sends_command() {
+        let base = mock::spawn().await;
+        let response = client(&base)
+            .fetch_ban("Cheater", 7, Some("exploits"))
+            .await
+            .unwrap();
+        assert!(response.command.contains("ban account Cheater 7d"));
+    }
+
+    #[tokio::test]
+    async fn gm_command_disabled_in_mcp() {
+        let base = mock::spawn().await;
+        let mcp = client_with_gm(&base, false);
+        let result = mcp
+            .run_gm_command(Parameters(GmCommandArgs {
+                command: "server info".to_string(),
+                dry_run: Some(false),
+            }))
+            .await
+            .unwrap();
+        assert!(result.is_error.unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn gm_command_dry_run_and_enabled_path() {
+        let base = mock::spawn().await;
+        let mcp = client_with_gm(&base, true);
+
+        let preview = mcp
+            .run_gm_command(Parameters(GmCommandArgs {
+                command: "server info".to_string(),
+                dry_run: None,
+            }))
+            .await
+            .unwrap();
+        assert!(!preview.is_error.unwrap_or(false));
+        assert!(format!("{preview:?}").contains("dry_run"));
+
+        let executed = mcp
+            .run_gm_command(Parameters(GmCommandArgs {
+                command: "server info".to_string(),
+                dry_run: Some(false),
+            }))
+            .await
+            .unwrap();
+        assert!(!executed.is_error.unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn restart_dry_run_previews_delay() {
+        let base = mock::spawn().await;
+        let result = client(&base)
+            .schedule_restart(Parameters(RestartServerArgs {
+                delay_seconds: Some(900),
+                dry_run: None,
+            }))
+            .await
+            .unwrap();
+        assert!(!result.is_error.unwrap_or(false));
+        assert!(format!("{result:?}").contains("900"));
     }
 
     #[tokio::test]

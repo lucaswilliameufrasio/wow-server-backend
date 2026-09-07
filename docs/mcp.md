@@ -139,6 +139,6 @@ mcp/
    7 tools, 3 resources + template `item://{entry}`, redação de PII, testes com mock.
 4. **Feito** — service tokens (`wowst_...`) na API + `/metrics` em porta privada.
 5. **Feito** — audit log + `lock_account` com `dry_run`/confirmação + `get_audit_log`.
-6. Integração WorldServer (módulo do core ou SOAP) → status/kick/ban/anúncio/restart.
-7. Por último: teleport, give item, dinheiro, level, e `execute_gm_command` atrás de
-   allowlist + flag de config explícita.
+6. **Feito** — integração WorldServer via SOAP na API → status, announce, restart,
+   kick, ban/unban + `run_gm_command` atrás de flag + allowlist.
+7. Pendente: teleport, give item, dinheiro, level, `get_crashes`, `get_server_logs`.

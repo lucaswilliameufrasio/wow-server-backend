@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
         config.request_timeout_secs,
     )?);
 
-    let service = WowMcp::new(api, metrics_api);
+    let service = WowMcp::new(api, metrics_api, config.gm_commands_enabled);
     let server = service.serve(stdio()).await?;
     server.waiting().await?;
     Ok(())

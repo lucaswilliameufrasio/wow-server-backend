@@ -19,9 +19,28 @@ Baseado no SDK oficial [rmcp](https://github.com/modelcontextprotocol/rust-sdk) 
 | `get_metrics` | `GET :METRICS_PORT/metrics` (Prometheus) |
 | `get_audit_log` | `GET /v1/admin/audit-log` (requer `audit:read`) |
 | `lock_account` | `PATCH /v1/admin/players/{id}/lock` (requer `players:write`) |
+| `get_server_status` | SOAP `server info` via API (requer `server:read`) |
+| `send_announcement` | SOAP `announce` via API (requer `server:control`) |
+| `kick_player` | SOAP `kick` via API (requer `players:kick`, destructive + dry_run) |
+| `ban_account` | SOAP `ban account` via API (requer `players:ban`, destructive + dry_run) |
+| `unban_account` | SOAP `unban account` via API (requer `players:ban`) |
+| `schedule_restart` | SOAP `server restart` via API (requer `server:control`, destructive + dry_run) |
+| `run_gm_command` | SOAP raw via API — **desabilitada por padrão** (ver abaixo) |
 
-Todas as tools read-only são marcadas com `read_only_hint = true`; `lock_account` é
-a única mutação, com `destructive_hint = true` e `dry_run` default `true`.
+Tools read-only têm `read_only_hint = true`; mutações destrutivas (`lock_account`,
+`kick_player`, `ban_account`, `schedule_restart`, `run_gm_command`) exigem
+`dry_run=false` na segunda chamada.
+
+### GM commands (off por padrão)
+
+A tool `run_gm_command` fica inoperante a menos que:
+
+1. o MCP rode com `MCP_ENABLE_GM_COMMANDS=true`, **e**
+2. a API rode com `WOW_ENABLE_GM_COMMANDS=true`, **e**
+3. o comando passe na allowlist da API (`WOW_GM_COMMAND_ALLOWLIST`), se configurada.
+
+Tudo é auditado (`server.gm_command`) e a API responde `403 GM_COMMAND_DISABLED`
+ou `403 COMMAND_NOT_ALLOWED` quando as travas não passam.
 
 ## Resources
 
@@ -43,6 +62,7 @@ descartados na fronteira MCP e nunca chegam ao modelo, mesmo que a API os retorn
 | `MCP_METRICS_BASE_URL` | `http://127.0.0.1:9090` | Base URL do servidor de métricas (Prometheus) |
 | `MCP_API_TOKEN` | — | Bearer token (service token `wowst_...` ou access token JWT) |
 | `MCP_REQUEST_TIMEOUT_SECS` | `30` | Timeout por request |
+| `MCP_ENABLE_GM_COMMANDS` | `false` | Habilita a tool `run_gm_command` (a API tem as próprias travas) |
 | `RUST_LOG` | `warn` | Log vai para stderr (stdout é o canal do MCP) |
 
 ## Como usar agora
@@ -112,6 +132,8 @@ printf '%s\n' \
 - "Onde estão os personagens da conta 3?"
 - "Qual o item de entry 19019?"
 - "A API está saudável? Mostra as métricas."
+- "Qual o status do worldserver? Manda um aviso que vai reiniciar em 15 min."
+- "Bane a conta Cheater por 7 dias por exploits." (pede confirmação via dry_run)
 
 ## Registro por cliente
 
