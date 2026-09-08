@@ -48,7 +48,9 @@ ensure_password() {
   fi
   command -v openssl >/dev/null 2>&1 || fail "openssl is required to generate passwords"
   local val
-  val="$(openssl rand -base64 24 | tr -d '\n=')"
+  # URL-safe (hex): passwords are interpolated into database URLs by the
+  # compose file, so characters like "/" or "+" would break the connection string.
+  val="$(openssl rand -hex 20)"
   if [[ -n "$current" ]]; then
     sed -i "s|^${var}=.*|${var}=${val}|" "$ENV_FILE"
   else

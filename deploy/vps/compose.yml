@@ -81,7 +81,7 @@ services:
 
   # Optional scheduled backup (enabled when WOW_BACKUP_SCHEDULE is set, e.g. "0 3 * * *").
   wow-backup:
-    image: postgres:18
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       WOW_PG_USER: ${WOW_PG_USER:-wow_api}
