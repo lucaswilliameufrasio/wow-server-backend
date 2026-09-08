@@ -504,9 +504,11 @@ cmd_smoke_test() {
   # 6. API auth
   info "6/6 Registration endpoint ..."
   local reg_resp reg_code body smoke_account_id
+  # Username must be alphanumeric (API validation); unique per run.
+  local smoke_user="smoke$(date +%s)"
   reg_resp=$(curl -sf -w '\n%{http_code}' -X POST "http://127.0.0.1:$port/v1/auth/register" \
     -H 'content-type: application/json' \
-    -d '{"username":"__smoke_test__","password":"SmokeTest123"}' 2>/dev/null || true)
+    -d "{\"username\":\"$smoke_user\",\"password\":\"SmokeTest123\"}" 2>/dev/null || true)
   reg_code=$(echo "$reg_resp" | tail -1)
   body=$(echo "$reg_resp" | head -n -1)
   smoke_account_id=$(echo "$body" | python3 -c "import sys,json
