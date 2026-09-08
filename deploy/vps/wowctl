@@ -135,32 +135,25 @@ ACEOF
     ok "JWT keys already exist"
   fi
 
-  # --- worldserver config overrides ---
-  local ws_conf_d="$ACORE_DIR/env/dist/etc/modules"
-  mkdir -p "$ws_conf_d"
-  if [[ ! -f "$ws_conf_d/00-wowctl.conf" ]]; then
-    cat > "$ws_conf_d/00-wowctl.conf" <<'WSCONF'
-# wowctl — performance and quality-of-life overrides
-MinWorldUpdateTime = 50
-WSCONF
-    ok "worldserver config overrides created"
-  else
-    ok "worldserver config overrides already exist"
-  fi
-  if ! grep -q '^SOAP.Enabled' "$ws_conf_d/00-wowctl.conf"; then
-    cat >> "$ws_conf_d/00-wowctl.conf" <<WSCONF
+  # --- worldserver settings via AC env file (AC_* envs survive config
+  # regeneration; the modules/ directory is NOT read by AzerothCore master).
+  local ws_env_file="$ACORE_DIR/conf/dist/env.ac"
+  touch "$ws_env_file"
+  ac_env_add() {
+    local key="$1" value="$2"
+    if ! grep -q "^${key}=" "$ws_env_file"; then
+      echo "${key}=${value}" >> "$ws_env_file"
+    fi
+  }
+  ac_env_add AC_SOAP_ENABLED 1
+  ac_env_add AC_SOAP_IP "0.0.0.0"
+  ac_env_add AC_SOAP_PORT "${WOW_SOAP_PORT:-7878}"
+  ac_env_add AC_MIN_WORLD_UPDATE_TIME 50
+  ok "worldserver settings written to $ws_env_file (SOAP on, local network only)"
 
-# wowctl — SOAP (used by ./wowctl reload)
-SOAP.Enabled = 1
-SOAP.IP = "0.0.0.0"
-SOAP.Port = 7878
-SOAP.User = "${WOW_SOAP_USER:-wowctl}"
-SOAP.Password = "${WOW_SOAP_PASSWORD}"
-WSCONF
-    ok "SOAP enabled (port 7878, local only)"
-  else
-    ok "SOAP already configured"
-  fi
+  info "SOAP auth uses a GM account (AzerothCore master checks the game"
+  info "account password and requires GM level 3). After setup-game, the"
+  info "credentials in $ENV_FILE (WOW_SOAP_USER/PASSWORD) point to the GM account."
 
   # --- Create backup directory ---
   mkdir -p "$BACKUP_DIR"
@@ -738,10 +731,18 @@ cmd_setup_game() {
   local admin_user="${1:-Admin}"
   local admin_pass="${2:-}"
   if [[ -z "$admin_pass" ]]; then
-    admin_pass="$(openssl rand -base64 12 | tr -d '\n=')"
+    admin_pass="$(openssl rand -hex 12)"
     info "Generated admin password for '$admin_user': $admin_pass"
   fi
   cmd_create_account "$admin_user" "$admin_pass" 3
+
+  # AzerothCore master authenticates SOAP with a game account (GM level 3+).
+  # Point the backend at the GM account and recreate it with the new env.
+  sed -i "s|^WOW_SOAP_USER=.*|WOW_SOAP_USER=$admin_user|" "$ENV_FILE"
+  sed -i "s|^WOW_SOAP_PASSWORD=.*|WOW_SOAP_PASSWORD=$admin_pass|" "$ENV_FILE"
+  load_env
+  be_compose up -d wow-backend >/dev/null
+  ok "SOAP credentials set to GM account '$admin_user'"
 
   # 2. Realm
   local realm="${3:-}"

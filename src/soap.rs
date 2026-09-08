@@ -60,7 +60,7 @@ pub fn build_soap_envelope(command: &str) -> String {
         "<SOAP-ENV:Envelope \
          xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\" \
          xmlns:ac=\"urn:AC\">\
-         <SOAP-ENV:Body><ac:executeCommand><ac:command>{}</ac:command>\
+         <SOAP-ENV:Body><ac:executeCommand><command>{}</command>\
          </ac:executeCommand></SOAP-ENV:Body></SOAP-ENV:Envelope>",
         escape_xml(command)
     )
@@ -146,6 +146,8 @@ mod tests {
     fn envelope_escapes_command() {
         let envelope = build_soap_envelope("kick Xe'rah & <boss>");
         assert!(envelope.contains("kick Xe&apos;rah &amp; &lt;boss&gt;"));
+        // AC master expects the command parameter WITHOUT a namespace prefix.
+        assert!(envelope.contains("<ac:executeCommand><command>"));
         assert!(envelope.starts_with("<SOAP-ENV:Envelope"));
     }
 
