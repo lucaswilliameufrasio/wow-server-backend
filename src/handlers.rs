@@ -955,7 +955,15 @@ async fn admin_create_service_token_handler(
     Json(body): Json<CreateServiceTokenRequest>,
 ) -> Result<Json<CreateServiceTokenResponse>, ApiError> {
     let auth = authenticate(&headers, &state).await?;
-    require_permission(&auth, "tokens:manage")?;
+    require_permission_audited(
+        &state,
+        &auth,
+        "tokens:manage",
+        "service_token.create",
+        "service_token",
+        None,
+    )
+    .await?;
 
     let name = body.name.trim();
     if name.is_empty() || name.len() > 100 {
@@ -996,6 +1004,17 @@ async fn admin_create_service_token_handler(
             expires_at_unix.map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
         )
         .await?;
+
+    // The token value itself is never logged: only the name and expiry.
+    write_audit(
+        &state,
+        &auth,
+        "service_token.create",
+        "service_token",
+        Some(&id.to_string()),
+        json!({ "name": name, "expires_at_unix": expires_at_unix }),
+    )
+    .await;
 
     Ok(Json(CreateServiceTokenResponse {
         id,
