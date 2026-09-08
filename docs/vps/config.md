@@ -74,6 +74,7 @@ ports:
 | `WOW_JWT_REFRESH_EXPIRES_DAYS` | `30` | Expiração do refresh token |
 | `WOW_BACKEND_IMAGE` | `ghcr.io/lucaswilliameufrasio/wow-server-backend` | Imagem do backend |
 | `WOW_NOTIFY_ENABLED` | `false` | Liga notificações de eventos administrativos via webhook |
+| `WOW_SOAP_USER` / `WOW_SOAP_PASSWORD` | conta GM | AzerothCore master autentica o SOAP com uma **conta do jogo** com GM level 3+; o `setup-game` aponta para a conta GM criada |
 | `WOW_DISCORD_WEBHOOK_URL` | — | Webhook do Discord (canal `#ops` por exemplo) |
 | `WOW_TELEGRAM_BOT_TOKEN` | — | Token do bot do Telegram (com `WOW_TELEGRAM_CHAT_ID`) |
 | `WOW_BACKEND_TAG` | `latest` | Tag da imagem |
