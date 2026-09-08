@@ -517,7 +517,7 @@ try:
     print(d.get('account_id', ''))
 except Exception:
     print('')" 2>/dev/null || echo "")
-  if [[ "$reg_code" == "201" || "$reg_code" == "409" ]]; then
+  if [[ "$reg_code" == "200" || "$reg_code" == "201" || "$reg_code" == "409" ]]; then
     ok "  Registration endpoint responds (HTTP $reg_code)"
   else
     warn "  Registration endpoint returned HTTP $reg_code"
