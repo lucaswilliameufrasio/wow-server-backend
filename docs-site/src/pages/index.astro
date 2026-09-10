@@ -1,0 +1,230 @@
+---
+import "../styles/global.css";
+
+const title = "wow-server-backend | The MMO server control plane";
+const description =
+  "A Rust HTTP API and MCP server for AzerothCore: 22 tools for your AI, RBAC service tokens, audit log, dry-run confirmations and Discord/Telegram webhooks. One-command VPS deploy.";
+const ogImage =
+  "https://raw.githubusercontent.com/lucaswilliameufrasio/wow-server-backend/main/docs-site/public/og-image.png";
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:alt" content="wow-server-backend — Rust API + MCP server for AzerothCore" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    <meta name="theme-color" content="#12100c" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title}</title>
+  </head>
+
+  <body class="m-0 bg-[#12100c] font-sans text-[#f0e9db] antialiased">
+    <main class="mx-auto max-w-[1180px] overflow-hidden px-7 max-md:px-4">
+      <!-- ============================== nav ============================== -->
+      <nav
+        class="flex h-[84px] items-center justify-between border-b border-[#332b20]"
+        aria-label="Main navigation"
+      >
+        <a class="flex items-center gap-2.5 text-lg font-bold tracking-tight" href="/" aria-label="wow-server-backend home">
+          <span
+            class="grid h-8 w-8 place-items-center rounded-lg bg-[#e6b23c] text-xl text-[#12100c]"
+            aria-hidden="true">W</span
+          >
+          <span class="leading-none">wow-server-backend</span>
+        </a>
+        <div class="flex items-center gap-6 text-sm text-[#a89e8a]">
+          <a class="transition-colors hover:text-[#e6b23c]" href="https://github.com/lucaswilliameufrasio/wow-server-backend">GitHub</a>
+          <a class="hidden transition-colors hover:text-[#e6b23c] sm:inline" href="#tools">AI tools</a>
+          <a
+            class="rounded-full border border-[#4a4030] px-4 py-2 text-[#f0e9db] transition-colors hover:border-[#e6b23c] hover:text-[#e6b23c]"
+            href="https://github.com/lucaswilliameufrasio/wow-server-backend/blob/main/docs/mcp.md"
+          >
+            MCP docs
+          </a>
+        </div>
+      </nav>
+
+      <!-- ============================== hero ============================= -->
+      <section class="grid min-h-[560px] items-center gap-[70px] py-20 md:grid-cols-[1.05fr_.95fr] max-md:block max-md:pb-16 max-md:pt-16">
+        <div class="max-md:mb-14">
+          <p class="m-0 text-xs font-bold tracking-[0.13em] text-[#e6b23c] uppercase">
+            <span class="mr-2 inline-block h-[7px] w-[7px] rounded-full bg-[#e6b23c] align-[1px] shadow-[0_0_0_5px_rgba(230,178,60,0.12)]"></span>
+            Open-source MCP server
+          </p>
+          <h1 class="m-0 mt-5 max-w-[680px] text-[clamp(50px,7vw,84px)] font-semibold leading-[0.98] tracking-[-0.05em]">
+            Give your AI a seat at the guild table.
+          </h1>
+          <p class="mx-0 mb-8 mt-7 max-w-[530px] text-lg leading-relaxed text-[#a89e8a]">
+            Your MMO server has no clicky web panel — and that's fine. Bring your AI instead:
+            inspect players and items, kick, ban, teleport, restock the vendors, call the reboot.
+            Hard actions preview before they commit. Everything is scoped, logged and rate-limited.
+          </p>
+          <div class="flex flex-wrap items-center gap-5">
+            <a
+              class="inline-flex items-center gap-3 rounded-full bg-[#e6b23c] px-5 py-3 text-sm font-bold text-[#12100c] transition-colors hover:bg-[#f3c761]"
+              href="#quick-start"
+            >
+              Raid night starts here <span aria-hidden="true">&#8594;</span>
+            </a>
+            <a
+              class="inline-flex items-center gap-3 rounded-full border border-[#4a4030] px-5 py-3 text-sm font-bold text-[#f0e9db] transition-colors hover:border-[#e6b23c] hover:text-[#e6b23c]"
+              href="https://github.com/lucaswilliameufrasio/wow-server-backend"
+            >
+              View source
+            </a>
+          </div>
+          <div class="mt-12 flex flex-wrap items-center gap-5 text-xs text-[#7a7060]">
+            <span>22 MCP tools</span>
+            <span class="border-l border-[#332b20] pl-5">Rust &middot; axum &middot; rmcp</span>
+            <span class="border-l border-[#332b20] pl-5">AzerothCore</span>
+            <span class="border-l border-[#332b20] pl-5">One-command VPS deploy</span>
+          </div>
+        </div>
+
+        <div
+          class="rotate-[1.5deg] rounded-2xl border border-[#332b20] bg-[#181510] shadow-[22px_24px_0_#0a0806] max-md:rotate-0 max-md:shadow-[10px_12px_0_#0a0806]"
+          aria-label="Example setup session"
+        >
+          <div class="flex items-center gap-1.5 border-b border-[#2c2620] px-4 py-3.5">
+            <span class="h-2 w-2 rounded-full bg-[#4a4030]"></span>
+            <span class="h-2 w-2 rounded-full bg-[#4a4030]"></span>
+            <span class="h-2 w-2 rounded-full bg-[#4a4030]"></span>
+            <small class="ml-auto font-mono text-[11px] text-[#6e6455]">/opt/wow-backend/deploy/vps</small>
+          </div>
+          <div class="p-6 font-mono text-[13px] leading-[2] text-[#e8dfcc] [&_b]:text-[#e6b23c] [&_p]:m-0">
+            <p><b>$</b> ./wowctl install</p>
+            <p class="text-[#776d5d]">AzerothCore cloned — secrets + JWT + realm configured</p>
+            <p><b>$</b> ./wowctl up</p>
+            <p class="text-[#776d5d]">First build compiles the world (~30&ndash;60 min). Worth it.</p>
+            <p><b>$</b> ./wowctl setup-game Thrall capivara123 SEU_IP</p>
+            <p class="text-[#776d5d]">GM account &middot; realm &middot; seeds &middot; smoke tests &mdash; 8/8 ok</p>
+            <p><b>$</b> ./wowctl create-mcp-token Thrall **** guild-bot 90</p>
+            <p class="text-[#776d5d]">wowst_4f8a&hellip; shown ONCE. Paste it into MCP_API_TOKEN.</p>
+            <p><b>&#10003;</b> Ready. Connect your MCP host and ride out.</p>
+            <p class="animate-pulse text-[#e6b23c]">&#9608;</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ features =========================== -->
+      <section
+        id="tools"
+        class="grid grid-cols-3 gap-px border border-[#332b20] bg-[#332b20] max-md:grid-cols-1"
+        aria-label="Features"
+      >
+        <article class="min-h-[230px] bg-[#17140f] p-7">
+          <span class="font-mono text-xs text-[#e6b23c]">01</span>
+          <h2 class="mt-5 mb-3 text-2xl">A full toolkit</h2>
+          <p class="text-[15px] leading-relaxed text-[#9a8f7c]">
+            Players, items, server ops and a locked-down GM shell: 22 read and action tools over
+            the official Rust MCP SDK, each bound to a scope like
+            <code class="text-[#e6b23c]">players:ban</code>.
+          </p>
+        </article>
+        <article class="min-h-[230px] bg-[#17140f] p-7">
+          <span class="font-mono text-xs text-[#e6b23c]">02</span>
+          <h2 class="mt-5 mb-3 text-2xl">Ask twice, wipe once</h2>
+          <p class="text-[15px] leading-relaxed text-[#9a8f7c]">
+            Every destructive action previews a plan first and fires only after
+            <code class="text-[#e6b23c]">dry_run=false</code>. Raw GM commands stay disabled
+            behind a flag and an allowlist.
+          </p>
+        </article>
+        <article class="min-h-[230px] bg-[#17140f] p-7">
+          <span class="font-mono text-xs text-[#e6b23c]">03</span>
+          <h2 class="mt-5 mb-3 text-2xl">Loot with receipts</h2>
+          <p class="text-[15px] leading-relaxed text-[#9a8f7c]">
+            Service tokens with granular scopes, a persistent audit log, Prometheus metrics and
+            Discord/Telegram pings on kick, ban and restart events.
+          </p>
+        </article>
+      </section>
+
+      <!-- ========================= quick start =========================== -->
+      <section class="grid items-center gap-[70px] px-12 py-32 md:grid-cols-[.8fr_1.2fr] max-md:px-4 max-md:py-20" id="quick-start">
+        <div>
+          <p class="m-0 text-xs font-bold tracking-[0.13em] text-[#e6b23c] uppercase">01 / Local setup</p>
+          <h2 class="m-0 mt-4 text-5xl max-md:text-4xl">Summon the realm in one command.</h2>
+          <p class="mt-4 text-[15px] leading-relaxed text-[#9a8f7c]">
+            <code class="text-[#e6b23c]">wowctl</code> clones AzerothCore, generates every secret,
+            compile the stack and performs the day-one ritual: GM account, realm address, seeds and
+            smoke checks. It wants a plain Ubuntu VPS with Docker — that's the gear check.
+          </p>
+          <a
+            class="mt-6 inline-block text-sm font-bold text-[#e6b23c] transition-colors hover:text-[#f3c761]"
+            href="https://github.com/lucaswilliameufrasio/wow-server-backend/tree/main/docs/vps"
+          >
+            Read the VPS guide <span aria-hidden="true">&#8594;</span>
+          </a>
+        </div>
+        <pre class="m-0 overflow-auto rounded-xl border border-[#332b20] bg-[#17140f] p-6 font-mono text-[13px] leading-loose text-[#e8dfcc]"><code><span class="text-[#6f625a]"># day one — the realm rises</span>
+git clone https://github.com/lucaswilliameufrasio/wow-server-backend.git
+cd wow-server-backend/deploy/vps
+
+./wowctl install          <span class="text-[#6f625a]"># secrets, JWT keys, AzerothCore sources</span>
+./wowctl up               <span class="text-[#6f625a]"># first build takes a while</span>
+./wowctl setup-game Thrall capivara123 SEU_IP
+./wowctl smoke-test       <span class="text-[#6f625a]"># 8/8 and the realm is live</span></code></pre>
+      </section>
+
+      <!-- ========================= MCP section =========================== -->
+      <section class="grid items-center gap-[70px] px-12 pb-32 md:grid-cols-[.8fr_1.2fr] max-md:block max-md:px-4 max-md:pb-20">
+        <div class="max-md:mb-10">
+          <p class="m-0 text-xs font-bold tracking-[0.13em] text-[#e6b23c] uppercase">02 / Arm your AI</p>
+          <h2 class="m-0 mt-4 text-5xl max-md:text-4xl">Equip any MCP-capable assistant.</h2>
+          <p class="mt-4 text-[15px] leading-relaxed text-[#9a8f7c]">
+            <code class="text-[#e6b23c]">wow-mcp</code> speaks stdio, talks only to your API — never
+            to the databases — and inherits the scopes of the service token you mint. It assumes
+            nothing: reticent by default, decisive when confirmed.
+          </p>
+          <a
+            class="mt-6 inline-block text-sm font-bold text-[#e6b23c] transition-colors hover:text-[#f3c761]"
+            href="https://github.com/lucaswilliameufrasio/wow-server-backend/blob/main/docs/mcp.md"
+          >
+            Full tool list and RBAC scopes <span aria-hidden="true">&#8594;</span>
+          </a>
+        </div>
+        <pre class="m-0 overflow-auto rounded-xl border border-[#332b20] bg-[#17140f] p-6 font-mono text-[13px] leading-loose text-[#e8dfcc]"><code><span class="text-[#6f625a]"># env for your MCP host (opencode, claude code, etc.)</span>
+MCP_API_URL=http://127.0.0.1:3000
+MCP_API_TOKEN=wowst_&#8230;        <span class="text-[#6f625a]"># wowctl create-mcp-token</span>
+
+<span class="text-[#6f625a]"># build from source and run over stdio</span>
+cargo install --git https://github.com/lucaswilliameufrasio/wow-server-backend wow-mcp
+wow-mcp</code></pre>
+      </section>
+
+      <!-- ============================ footer ============================= -->
+      <section class="border-t border-[#332b20] py-20 pb-28 text-center">
+        <p class="m-0 text-xs font-bold tracking-[0.13em] text-[#e6b23c] uppercase">Forge your own instance</p>
+        <h2 class="mx-auto mt-5 mb-8 max-w-[760px] text-[clamp(40px,6vw,70px)] font-semibold leading-none tracking-[-0.05em]">
+          Server is up. Loot responsibly.
+        </h2>
+        <a
+          class="inline-flex items-center gap-3 rounded-full bg-[#e6b23c] px-6 py-3.5 text-sm font-bold text-[#12100c] transition-colors hover:bg-[#f3c761]"
+          href="https://github.com/lucaswilliameufrasio/wow-server-backend"
+        >
+          Enter the repository <span aria-hidden="true">&#8594;</span>
+        </a>
+        <p class="mx-auto mt-9 max-w-[540px] text-sm leading-relaxed text-[#7a7060]">
+          Fan-made administration tooling for the open-source AzerothCore project. This site uses
+          an original look and feel — no game-brand assets. Not affiliated with, endorsed by or
+          associated with Blizzard Entertainment or any game publisher.
+        </p>
+      </section>
+
+      <footer class="flex justify-between gap-5 border-t border-[#332b20] pb-7 pt-5 text-xs text-[#6e6455] max-md:flex-col">
+        <span>&copy; 2026 wow-server-backend</span>
+        <span>MIT &middot; built for the open-source AzerothCore ecosystem</span>
+      </footer>
+    </main>
+  </body>
+</html>
