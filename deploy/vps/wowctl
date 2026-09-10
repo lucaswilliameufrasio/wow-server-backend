@@ -279,10 +279,10 @@ cmd_set_realm() {
   local address="${1:-}"
   local local_address="${2:-}"
 
-  if [[ -z "$address" ]]; then
+  if [[ -z "$address" && -t 0 ]]; then
     read -rp "Realm public IP or domain: " address
   fi
-  if [[ -z "$local_address" ]]; then
+  if [[ -z "$local_address" && -t 0 ]]; then
     read -rp "Realm local IP (leave empty to use public IP): " local_address
   fi
   [[ -z "$local_address" ]] && local_address="$address"
