@@ -25,7 +25,7 @@ services:
       context: ../..
       dockerfile: Dockerfile.production
     ports:
-      - "127.0.0.1:${WOW_API_PORT:-3000}:${WOW_API_PORT:-3000}"
+      - "${WOW_API_BIND:-127.0.0.1}:${WOW_API_PORT:-3000}:${WOW_API_PORT:-3000}"
     environment:
       AZEROTH_CORE_MYSQL_DATABASE_URL: mysql://${WOW_MYSQL_USER:-root}:${WOW_MYSQL_PASSWORD}@ac-database:3306
       AZEROTH_CORE_AUTH_DB: acore_auth

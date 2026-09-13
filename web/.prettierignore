@@ -1,0 +1,14 @@
+# Package Managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+
+# Miscellaneous
+/static/
+/project.inlang/
+
+# Agent skill references contain patch markers in documentation examples.
+/.github/skills/
+/.cursor/skills/
