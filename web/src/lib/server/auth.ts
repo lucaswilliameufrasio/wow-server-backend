@@ -15,42 +15,49 @@ const refreshCookie = 'wow_refresh_token';
 const cookieOptions = {
 	path: '/',
 	httpOnly: true,
-	sameSite: 'lax' as const,
-	secure: !dev
+	sameSite: 'lax' as const
 };
+
+function getCookieOptions(secure = !dev) {
+	return { ...cookieOptions, secure };
+}
 
 function setTokenCookies(
 	cookies: Cookies,
 	tokens: Pick<
 		SignInResponse,
 		'access_token' | 'refresh_token' | 'expires_in_seconds' | 'refresh_expires_in_seconds'
-	>
+	>,
+	secure = !dev
 ) {
 	cookies.set(accessCookie, tokens.access_token, {
-		...cookieOptions,
+		...getCookieOptions(secure),
 		maxAge: tokens.expires_in_seconds
 	});
 	cookies.set(refreshCookie, tokens.refresh_token, {
-		...cookieOptions,
+		...getCookieOptions(secure),
 		maxAge: tokens.refresh_expires_in_seconds
 	});
 }
 
-export function clearAuthCookies(cookies: Cookies) {
-	cookies.delete(accessCookie, cookieOptions);
-	cookies.delete(refreshCookie, cookieOptions);
+export function clearAuthCookies(cookies: Cookies, secure = !dev) {
+	cookies.delete(accessCookie, getCookieOptions(secure));
+	cookies.delete(refreshCookie, getCookieOptions(secure));
 }
 
-export async function signIn(cookies: Cookies, username: string, password: string) {
+export async function signIn(cookies: Cookies, username: string, password: string, secure = !dev) {
 	const response = await backendRequest<SignInResponse>('/v1/auth/sign-in', {
 		method: 'POST',
 		body: JSON.stringify({ username, password })
 	});
-	setTokenCookies(cookies, response);
+	setTokenCookies(cookies, response, secure);
 	return response;
 }
 
-export async function getCurrentAccount(cookies: Cookies): Promise<AuthMeResponse | null> {
+export async function getCurrentAccount(
+	cookies: Cookies,
+	secure = !dev
+): Promise<AuthMeResponse | null> {
 	const accessToken = cookies.get(accessCookie);
 	if (!accessToken) return null;
 
@@ -71,7 +78,7 @@ export async function getCurrentAccount(cookies: Cookies): Promise<AuthMeRespons
 				method: 'POST',
 				body: JSON.stringify({ refresh_token: refreshToken })
 			});
-			setTokenCookies(cookies, refreshed);
+			setTokenCookies(cookies, refreshed, secure);
 			return await backendRequest<AuthMeResponse>('/v1/auth/me', {
 				accessToken: refreshed.access_token
 			});

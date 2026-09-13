@@ -8,7 +8,7 @@ export const load: PageServerLoad = ({ locals }) => {
 };
 
 export const actions: Actions = {
-	default: async ({ request, cookies }) => {
+	default: async ({ request, cookies, url }) => {
 		const form = await request.formData();
 		const username = String(form.get('username') ?? '').trim();
 		const password = String(form.get('password') ?? '');
@@ -18,7 +18,7 @@ export const actions: Actions = {
 		}
 
 		try {
-			await signIn(cookies, username, password);
+			await signIn(cookies, username, password, url.protocol === 'https:');
 		} catch (error) {
 			if (error instanceof BackendError) {
 				return fail(error.status === 401 ? 401 : 400, {

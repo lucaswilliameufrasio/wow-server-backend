@@ -28,7 +28,10 @@ const handleSession: Handle = async ({ event, resolve }) => {
 		return resolve(event);
 	}
 
-	event.locals.session = await getCurrentAccount(event.cookies).then((account) =>
+	event.locals.session = await getCurrentAccount(
+		event.cookies,
+		event.url.protocol === 'https:'
+	).then((account) =>
 		account
 			? {
 					accountId: account.account_id,

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { applyAction, enhance } from '$app/forms';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import type { Pathname } from '$app/types';
 	import { ArrowLeft, UserRoundPlus } from '@lucide/svelte';
 	import type { ActionData } from './$types';
 
@@ -48,6 +50,10 @@
 				use:enhance={() => {
 					submitting = true;
 					return async ({ result }) => {
+						if (result.type === 'redirect') {
+							await goto(resolve(result.location as Pathname));
+							return;
+						}
 						await applyAction(result);
 						submitting = false;
 					};

@@ -3,7 +3,7 @@ import { backendRequest } from '$lib/server/api';
 import { clearAuthCookies, getAccessToken, getRefreshToken } from '$lib/server/auth';
 import type { RequestHandler } from './$types';
 
-export const POST: RequestHandler = async ({ cookies }) => {
+export const POST: RequestHandler = async ({ cookies, url }) => {
 	const accessToken = getAccessToken(cookies);
 	const refreshToken = getRefreshToken(cookies);
 
@@ -15,6 +15,6 @@ export const POST: RequestHandler = async ({ cookies }) => {
 		}).catch(() => undefined);
 	}
 
-	clearAuthCookies(cookies);
+	clearAuthCookies(cookies, url.protocol === 'https:');
 	throw redirect(303, '/login');
 };
