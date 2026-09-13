@@ -16,6 +16,18 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 	});
 
 const handleSession: Handle = async ({ event, resolve }) => {
+	const pathname = event.url.pathname;
+	const needsSession =
+		pathname === '/login' ||
+		pathname === '/register' ||
+		pathname.startsWith('/dashboard') ||
+		pathname.startsWith('/characters');
+
+	if (!needsSession) {
+		event.locals.session = null;
+		return resolve(event);
+	}
+
 	event.locals.session = await getCurrentAccount(event.cookies).then((account) =>
 		account
 			? {

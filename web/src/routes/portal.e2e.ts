@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 
 test('renders the realm entry points', async ({ page }) => {
+	const health = await page.request.get('/health');
+	expect(health.ok()).toBe(true);
+
 	await page.goto('/');
 	await expect(page).toHaveTitle(/Tirion \| Realm portal/);
 	await expect(page.getByRole('heading', { name: /keep your place/i })).toBeVisible();

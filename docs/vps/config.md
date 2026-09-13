@@ -52,6 +52,28 @@ ports:
   - "${WOW_API_BIND:-127.0.0.1}:${WOW_API_PORT:-3000}:${WOW_API_PORT:-3000}"
 ```
 
+## Portal web SvelteKit
+
+O serviço `wow-web` roda no mesmo Compose e conversa com a API pela rede Docker:
+
+```env
+WOW_WEB_PORT=3001
+WOW_WEB_BIND=127.0.0.1
+WOW_WEB_ORIGIN=http://127.0.0.1:3001
+WOW_WEB_API_URL=http://wow-backend:3000
+```
+
+Por padrão, o portal também fica local-only. Para acesso privado via Tailscale,
+defina `WOW_WEB_BIND` para o IP Tailscale da VPS e recrie somente o serviço web:
+
+```bash
+docker compose -p wow-backend-vps up -d --force-recreate wow-web
+```
+
+O backend não deve ser apontado para o hostname público a partir do navegador;
+o BFF do SvelteKit usa `http://wow-backend:3000` dentro da rede Docker e mantém
+os tokens em cookies `HttpOnly`.
+
 ## Variáveis de ambiente completas
 
 | Variável | Padrão | Descrição |
@@ -62,6 +84,11 @@ ports:
 | `WOW_MYSQL_PASSWORD` | **obrigatório** | Senha root MySQL |
 | `WOW_MYSQL_USER` | `root` | Usuário MySQL da API |
 | `WOW_API_PORT` | `3000` | Porta da API |
+| `WOW_API_BIND` | `127.0.0.1` | IP de bind da API |
+| `WOW_WEB_PORT` | `3001` | Porta do portal web |
+| `WOW_WEB_BIND` | `127.0.0.1` | IP de bind do portal web |
+| `WOW_WEB_ORIGIN` | `http://127.0.0.1:3001` | Origin usado pelo SvelteKit |
+| `WOW_WEB_API_URL` | `http://wow-backend:3000` | URL da API vista pelo BFF |
 | `WOW_METRICS_PORT` | `9090` | Porta do servidor de métricas Prometheus (interno, não publicado pelo compose) |
 | `WOW_RUST_LOG` | `info` | Nível de log da API |
 | `WOW_SRP6_CORE5_MODE` | `false` | Formato do verifier SRP6. `false` = AzerothCore master (padrão); `true` = formato "core 5" de outros cores. Ver [SRP6](#srp6-e-criacao-de-contas) |
@@ -83,7 +110,6 @@ ports:
 | `WOW_ACORE_DIR` | `/opt/azerothcore-wotlk` | Caminho do checkout do AC |
 | `WOW_BACKUP_DIR` | `/srv/wow/backups` | Diretório de backups |
 | `WOW_BACKUP_RETENTION_DAYS` | `30` | Retenção em dias |
-| `WOW_API_BIND` | `127.0.0.1` | IP para bind da API |
 
 ## SRP6 e criação de contas
 

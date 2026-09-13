@@ -83,6 +83,32 @@ services:
       retries: 3
       start_period: 30s
 
+  wow-web:
+    image: ${WOW_WEB_IMAGE:-ghcr.io/lucaswilliameufrasio/wow-server-backend-web}:${WOW_WEB_TAG:-latest}
+    build:
+      context: ../..
+      dockerfile: web/Dockerfile.production
+    ports:
+      - "${WOW_WEB_BIND:-127.0.0.1}:${WOW_WEB_PORT:-3001}:3001"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      ORIGIN: ${WOW_WEB_ORIGIN:-http://127.0.0.1:3001}
+      PUBLIC_API_URL: ${WOW_WEB_API_URL:-http://wow-backend:3000}
+    networks:
+      - wow-shared
+    depends_on:
+      wow-backend:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   # Optional scheduled backup (enabled when WOW_BACKUP_SCHEDULE is set, e.g. "0 3 * * *").
   wow-backup:
     image: postgres:18-alpine
