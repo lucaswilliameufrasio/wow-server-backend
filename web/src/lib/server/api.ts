@@ -25,6 +25,35 @@ export interface RefreshResponse {
 	refresh_expires_in_seconds: number;
 }
 
+export interface CharacterSummary {
+	guid: number;
+	name: string;
+	race: number;
+	class_id: number;
+	gender: number;
+	level: number;
+	map: number;
+	zone: number;
+	online: boolean;
+	money: number;
+}
+
+export interface CharacterListResponse {
+	account_id: number;
+	characters: CharacterSummary[];
+}
+
+export interface CharacterLocationResponse {
+	guid: number;
+	name: string;
+	map: number;
+	zone: number;
+	position_x: number;
+	position_y: number;
+	position_z: number;
+	online: boolean;
+}
+
 export interface ApiErrorBody {
 	message?: string;
 	error_code?: string;

@@ -5,16 +5,12 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ locals, cookies }) => {
 	const account = requireAccount(locals);
 	const accessToken = getAccessToken(cookies);
-	if (!accessToken) return { account, characters: [], charactersError: 'Session expired.' };
+	if (!accessToken) return { account, characters: [], error: 'Session expired.' };
 
 	try {
 		const response = await listCharacters(accessToken);
-		return { account, characters: response.characters, charactersError: null };
+		return { account, characters: response.characters, error: null };
 	} catch {
-		return {
-			account,
-			characters: [],
-			charactersError: 'The roster could not be loaded right now.'
-		};
+		return { account, characters: [], error: 'The roster could not be loaded right now.' };
 	}
 };

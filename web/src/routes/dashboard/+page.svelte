@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { ArrowRight, LogOut, Users } from '@lucide/svelte';
 	import { resolve } from '$app/paths';
+	import { getClassName, getRaceName } from '$lib/game-data';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+	let onlineCount = $derived(data.characters.filter((character) => character.online).length);
 </script>
 
 <svelte:head>
@@ -42,6 +44,24 @@
 			</p>
 		</div>
 
+		<div class="mb-4 grid gap-4 sm:grid-cols-3">
+			<div class="realm-panel p-5">
+				<p class="realm-kicker mb-3">Roster size</p>
+				<p class="text-3xl font-semibold text-foreground">{data.characters.length}</p>
+				<p class="mt-1 text-xs text-muted-foreground">registered characters</p>
+			</div>
+			<div class="realm-panel p-5">
+				<p class="realm-kicker mb-3">Online now</p>
+				<p class="text-3xl font-semibold text-emerald-300">{onlineCount}</p>
+				<p class="mt-1 text-xs text-muted-foreground">adventurers in the world</p>
+			</div>
+			<div class="realm-panel p-5">
+				<p class="realm-kicker mb-3">Realm</p>
+				<p class="text-3xl font-semibold text-primary">Online</p>
+				<p class="mt-1 text-xs text-muted-foreground">Tirion / Azeroth</p>
+			</div>
+		</div>
+
 		<div class="grid gap-4 sm:grid-cols-2">
 			<div class="realm-panel p-6">
 				<div
@@ -51,9 +71,19 @@
 				</div>
 				<p class="realm-kicker mb-3">Characters</p>
 				<h2 class="text-2xl font-semibold text-foreground">Your roster</h2>
-				<p class="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
-					See your heroes, levels and where they last stood in Azeroth.
-				</p>
+				{#if data.charactersError}
+					<p class="mt-2 max-w-sm text-sm leading-6 text-amber-200">{data.charactersError}</p>
+				{:else if data.characters.length > 0}
+					<p class="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+						{data.characters[0].name}, level {data.characters[0].level}
+						{getRaceName(data.characters[0].race)}
+						{getClassName(data.characters[0].class_id)}
+					</p>
+				{:else}
+					<p class="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+						No characters have crossed the gates yet.
+					</p>
+				{/if}
 				<a
 					class="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"
 					href={resolve('/characters')}

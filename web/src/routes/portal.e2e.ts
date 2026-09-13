@@ -17,4 +17,7 @@ test('renders the realm entry points', async ({ page }) => {
 test('protects the command center', async ({ page }) => {
 	await page.goto('/dashboard');
 	await expect(page).toHaveURL(/\/login$/);
+
+	await page.goto('/characters/1');
+	await expect(page).toHaveURL(/\/login$/);
 });
