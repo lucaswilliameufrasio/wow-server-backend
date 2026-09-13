@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
+	import { applyAction, enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { ArrowRight, LockKeyhole, ShieldCheck, Sparkles } from '@lucide/svelte';
 	import type { ActionData } from './$types';
@@ -86,8 +86,8 @@
 					method="POST"
 					use:enhance={() => {
 						submitting = true;
-						return async ({ update }) => {
-							await update();
+						return async ({ result }) => {
+							await applyAction(result);
 							submitting = false;
 						};
 					}}
