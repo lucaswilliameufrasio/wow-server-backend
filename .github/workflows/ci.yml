@@ -56,7 +56,13 @@ jobs:
       - name: Coverage
         run: |
           cargo install cargo-llvm-cov
-          cargo llvm-cov --workspace --all-targets --all-features -- --test-threads=1
+          cargo llvm-cov \
+            --workspace \
+            --all-targets \
+            --all-features \
+            --ignore-filename-regex '(^|/)main.rs$' \
+            --fail-under-lines 80 \
+            -- --include-ignored --test-threads=1
 
       - name: Build (release)
         run: cargo build --release
