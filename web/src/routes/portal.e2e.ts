@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('renders the realm entry points', async ({ page }) => {
+test('Should render the realm entry points', async ({ page }) => {
 	const health = await page.request.get('/health');
 	expect(health.ok()).toBe(true);
 
@@ -17,7 +17,7 @@ test('renders the realm entry points', async ({ page }) => {
 	await expect(page.getByRole('button', { name: /create account/i })).toBeVisible();
 });
 
-test('protects the command center', async ({ page }) => {
+test('Should protect the command center', async ({ page }) => {
 	await page.goto('/dashboard');
 	await expect(page).toHaveURL(/\/login$/);
 
@@ -25,7 +25,7 @@ test('protects the command center', async ({ page }) => {
 	await expect(page).toHaveURL(/\/login$/);
 });
 
-test('logs in and navigates to the command center', async ({ page, context }) => {
+test('Should log in and navigate to the command center', async ({ page, context }) => {
 	await page.goto('/login');
 	await page.locator('input[name=username]').fill('demo-player');
 	await page.locator('input[name=password]').fill('DemoPassword9!');
