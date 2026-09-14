@@ -29,6 +29,7 @@ export default defineConfig({
 			provider: 'v8',
 			include: ['src/lib/**/*.ts', 'src/routes/**/*.{ts,svelte}'],
 			reporter: ['text', 'html', 'lcov'],
+			thresholds: { lines: 80 },
 			exclude: ['src/lib/paraglide/**', 'src/**/*.e2e.{js,ts}', 'src/**/*.d.ts', 'src/**/$types.*']
 		},
 		projects: [
