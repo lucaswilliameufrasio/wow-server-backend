@@ -46,15 +46,17 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test
+        run: |
+          cargo test --workspace --all-targets --all-features -- --test-threads=1
+          cargo test --workspace --all-targets --all-features -- --ignored --test-threads=1
 
       - name: Coverage
         run: |
           cargo install cargo-llvm-cov
-          cargo llvm-cov --all-targets
+          cargo llvm-cov --workspace --all-targets --all-features -- --test-threads=1
 
       - name: Build (release)
         run: cargo build --release

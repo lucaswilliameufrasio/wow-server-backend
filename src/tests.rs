@@ -14,7 +14,7 @@ use tower::ServiceExt;
 
 use std::sync::Arc;
 
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{mysql::MySqlPoolOptions, postgres::PgPoolOptions};
 
 use crate::auth::*;
 use crate::error::*;
@@ -2106,18 +2106,207 @@ fn read_user_agent_returns_value() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+#[ignore = "requires a MySQL Docker daemon; run the integration test target explicitly"]
+async fn integration_000_live_mysql_repositories_cover_player_queries() {
+    use testcontainers::runners::AsyncRunner;
+
+    let init_sql = r#"
+        CREATE DATABASE acore_auth;
+        CREATE DATABASE acore_characters;
+        CREATE DATABASE acore_world;
+        CREATE TABLE acore_auth.account (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(32) NOT NULL UNIQUE,
+            email VARCHAR(254) NULL,
+            reg_mail VARCHAR(254) NOT NULL DEFAULT '',
+            salt VARBINARY(64) NOT NULL,
+            verifier VARBINARY(256) NOT NULL,
+            locked BOOLEAN NOT NULL DEFAULT FALSE,
+            failed_logins INT NOT NULL DEFAULT 0,
+            joindate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_login DATETIME NULL,
+            last_ip VARCHAR(45) NULL
+        );
+        CREATE TABLE acore_auth.account_access (
+            id BIGINT UNSIGNED NOT NULL,
+            gmlevel INT NOT NULL
+        );
+        CREATE TABLE acore_characters.characters (
+            guid BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+            account BIGINT UNSIGNED NOT NULL,
+            name VARCHAR(12) NOT NULL,
+            race TINYINT UNSIGNED NOT NULL,
+            class TINYINT UNSIGNED NOT NULL,
+            gender TINYINT UNSIGNED NOT NULL,
+            level TINYINT UNSIGNED NOT NULL,
+            map SMALLINT UNSIGNED NOT NULL,
+            zone INT UNSIGNED NOT NULL,
+            online BOOLEAN NOT NULL DEFAULT FALSE,
+            money BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            position_x FLOAT NOT NULL DEFAULT 0,
+            position_y FLOAT NOT NULL DEFAULT 0,
+            position_z FLOAT NOT NULL DEFAULT 0,
+            orientation FLOAT NOT NULL DEFAULT 0,
+            `order` INT NOT NULL DEFAULT 0,
+            deleteDate BIGINT NULL
+        );
+        CREATE TABLE acore_world.item_template (
+            entry INT UNSIGNED NOT NULL PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            Quality TINYINT UNSIGNED NOT NULL,
+            ItemLevel INT UNSIGNED NOT NULL,
+            class TINYINT UNSIGNED NOT NULL,
+            subclass TINYINT UNSIGNED NOT NULL,
+            displayid INT UNSIGNED NOT NULL,
+            FULLTEXT KEY item_name_search (name)
+        );
+    "#;
+    let container = testcontainers_modules::mysql::Mysql::default()
+        .with_init_sql(init_sql.as_bytes().to_vec())
+        .start()
+        .await
+        .expect("Docker is required for MySQL integration tests");
+    let host = container.get_host().await.expect("container host");
+    let port = container
+        .get_host_port_ipv4(3306)
+        .await
+        .expect("container port");
+    let pool = MySqlPoolOptions::new()
+        .max_connections(5)
+        .connect(&format!("mysql://root@{host}:{port}/test"))
+        .await
+        .expect("MySQL pool");
+
+    let account_repo =
+        LiveAccountRepo::new(pool.clone(), "acore_auth".into(), "acore_characters".into());
+    let character_repo = LiveCharacterRepo::new(pool.clone(), "acore_characters".into());
+    let item_repo = LiveItemRepo::new(pool.clone(), "acore_world".into());
+
+    let account_id = account_repo
+        .create(
+            "IntegrationPlayer",
+            &[1, 2],
+            &[3, 4],
+            Some("player@example.test"),
+            "127.0.0.1",
+        )
+        .await
+        .expect("create account");
+    assert!(
+        account_repo
+            .exists("IntegrationPlayer")
+            .await
+            .expect("exists")
+    );
+    assert!(!account_repo.exists("MissingPlayer").await.expect("missing"));
+    assert_eq!(
+        account_repo
+            .find_username(account_id)
+            .await
+            .expect("username")
+            .as_deref(),
+        Some("IntegrationPlayer")
+    );
+    account_repo
+        .increment_failed_logins(account_id)
+        .await
+        .expect("failed login");
+    account_repo
+        .record_successful_login(account_id, "127.0.0.2")
+        .await
+        .expect("successful login");
+    account_repo
+        .update_lock(account_id, true)
+        .await
+        .expect("lock account");
+    assert!(
+        account_repo
+            .find_auth(account_id)
+            .await
+            .expect("auth")
+            .expect("row")
+            .locked
+    );
+    account_repo
+        .update_lock(account_id, false)
+        .await
+        .expect("unlock account");
+    account_repo
+        .find_auth(account_id)
+        .await
+        .expect("cached auth");
+
+    sqlx::query("INSERT INTO acore_auth.account_access (id, gmlevel) VALUES (?, ?)")
+        .bind(account_id)
+        .bind(3)
+        .execute(&pool)
+        .await
+        .expect("gm level");
+    assert_eq!(account_repo.get_gm_level(account_id).await, 3);
+    sqlx::query("INSERT INTO acore_characters.characters (guid, account, name, race, class, gender, level, map, zone, online, money, position_x, position_y, position_z, orientation, `order`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(9001_u64).bind(account_id).bind("IntHero").bind(1_u8).bind(1_u8).bind(0_u8).bind(80_u8).bind(0_u16).bind(12_u32).bind(true).bind(123_u64).bind(1.0_f32).bind(2.0_f32).bind(3.0_f32).bind(4.0_f32).bind(1_i32)
+        .execute(&pool).await.expect("character");
+    sqlx::query("INSERT INTO acore_world.item_template (entry, name, Quality, ItemLevel, class, subclass, displayid) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(100_u32).bind("Integration Sword").bind(4_u8).bind(264_u32).bind(2_u8).bind(7_u8).bind(1234_u32)
+        .execute(&pool).await.expect("item");
+
+    assert_eq!(
+        character_repo
+            .list_for_account(account_id)
+            .await
+            .expect("characters")
+            .len(),
+        1
+    );
+    assert_eq!(
+        character_repo.find_owner(9001).await.expect("owner"),
+        Some(account_id)
+    );
+    assert_eq!(
+        character_repo
+            .find_location(9001)
+            .await
+            .expect("location")
+            .expect("row")
+            .position_x,
+        1.0
+    );
+    assert_eq!(
+        character_repo
+            .find_locations_by_account(account_id)
+            .await
+            .expect("locations")
+            .len(),
+        1
+    );
+    let query = ItemQuery {
+        search: Some("Integration".into()),
+        class: Some(2),
+        limit: Some(10),
+        cursor: None,
+    };
+    assert_eq!(item_repo.search(&query).await.expect("items").0.len(), 1);
+    assert_eq!(
+        item_repo
+            .find_by_entry(100)
+            .await
+            .expect("item")
+            .expect("row")
+            .entry,
+        100
+    );
+}
+
+#[tokio::test]
 async fn integration_refresh_token_store_find_revoke() {
     use testcontainers::runners::AsyncRunner;
 
     let pg_image = testcontainers_modules::postgres::Postgres::default();
     let container: testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres> =
-        match pg_image.start().await {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("testcontainers skipped (Docker unavailable?): {e}");
-                return;
-            }
-        };
+        pg_image
+            .start()
+            .await
+            .expect("Docker is required for integration tests");
 
     let host = container.get_host().await.expect("container host");
     let port = container
@@ -2217,13 +2406,10 @@ async fn integration_access_token_revocation_roundtrip() {
 
     let pg_image = testcontainers_modules::postgres::Postgres::default();
     let container: testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres> =
-        match pg_image.start().await {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("testcontainers skipped (Docker unavailable?): {e}");
-                return;
-            }
-        };
+        pg_image
+            .start()
+            .await
+            .expect("Docker is required for integration tests");
 
     let host = container.get_host().await.expect("container host");
     let port = container
@@ -2857,13 +3043,10 @@ async fn integration_audit_repo_roundtrip() {
 
     let pg_image = testcontainers_modules::postgres::Postgres::default();
     let container: testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres> =
-        match pg_image.start().await {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("testcontainers skipped (Docker unavailable?): {e}");
-                return;
-            }
-        };
+        pg_image
+            .start()
+            .await
+            .expect("Docker is required for integration tests");
 
     let host = container.get_host().await.expect("container host");
     let port = container
