@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BackendError, backendRequest } from './api';
-import { clearAuthCookies, getCurrentAccount, signIn } from './auth';
+import {
+	clearAuthCookies,
+	getAccessToken,
+	getCurrentAccount,
+	getRefreshToken,
+	requireAccount,
+	signIn
+} from './auth';
 
 vi.mock('./api', () => ({
 	BackendError: class BackendError extends Error {
@@ -58,6 +65,22 @@ describe('auth cookies', () => {
 
 		await expect(getCurrentAccount(cookies as never, false)).resolves.toBeNull();
 		expect(backendRequestMock).not.toHaveBeenCalled();
+	});
+
+	it('Should return no account for a non-authentication backend error', async () => {
+		const cookies = createCookies({ wow_access_token: 'access' });
+		backendRequestMock.mockRejectedValue(new BackendError(500, 'server error'));
+
+		await expect(getCurrentAccount(cookies as never, false)).resolves.toBeNull();
+		expect(backendRequestMock).toHaveBeenCalledTimes(1);
+	});
+
+	it('Should clear cookies when the access token expires without a refresh token', async () => {
+		const cookies = createCookies({ wow_access_token: 'expired' });
+		backendRequestMock.mockRejectedValue(new BackendError(401, 'expired'));
+
+		await expect(getCurrentAccount(cookies as never, false)).resolves.toBeNull();
+		expect(cookies.delete).toHaveBeenCalledTimes(2);
 	});
 
 	it('Should load the current account with a valid access token', async () => {
@@ -119,5 +142,22 @@ describe('auth cookies', () => {
 		clearAuthCookies(cookies as never, false);
 
 		expect(cookies.delete).toHaveBeenCalledTimes(2);
+	});
+
+	it('Should return the session account when authentication is present', () => {
+		const account = { accountId: 1 } as never;
+
+		expect(requireAccount({ session: account })).toBe(account);
+	});
+
+	it('Should redirect when authentication is missing', () => {
+		expect(() => requireAccount({ session: null })).toThrow();
+	});
+
+	it('Should read access and refresh token cookies', () => {
+		const cookies = createCookies({ wow_access_token: 'access', wow_refresh_token: 'refresh' });
+
+		expect(getAccessToken(cookies as never)).toBe('access');
+		expect(getRefreshToken(cookies as never)).toBe('refresh');
 	});
 });
