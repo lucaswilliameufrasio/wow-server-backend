@@ -21,6 +21,33 @@ cd /opt/wow-backend/deploy/vps
 
 ## Atualizar backend
 
+### Deploy pelo computador de desenvolvimento
+
+O alvo abaixo prepara a configuração remota se necessário, builda backend,
+portal web e, no primeiro deploy sem imagens do AzerothCore, também builda as
+imagens do AzerothCore na máquina que executou `make`. Transfere as imagens e
+sobe os serviços remotos com `--no-build`:
+
+```bash
+make deploy-to-server SSH_ALIAS=meu-servidor REMOTE_DIR=/opt/wow-backend/deploy/vps TAG=$(git rev-parse --short HEAD)
+```
+
+Também aceita `SSH_USER`/`SSH_HOST` no lugar de `SSH_ALIAS`. `IMAGE_NAME`,
+`WEB_IMAGE_NAME`, `TAG` e `TARGET_PLATFORM` podem ser definidos. Se você já tem
+um checkout local do AzerothCore, informe `ACORE_REPO_DIR=/caminho/azerothcore`;
+caso contrário, o alvo clona o AzerothCore em um diretório temporário para o
+build inicial. A instalação remota gera `.env` e chaves JWT com `wowctl install`.
+O `wowctl` verifica o health check e tenta restaurar as referências anteriores
+se a nova versão da aplicação não ficar saudável.
+
+Esse deploy recria o container único da API e pode causar uma breve
+indisponibilidade. O compose atual publica a API diretamente numa porta fixa;
+blue/green sem interrupção exige um proxy que consiga alternar entre duas
+instâncias e as duas instâncias precisam compartilhar o serviço de migrations.
+Por isso este alvo ainda pode ter downtime durante a troca da API. O primeiro
+build do AzerothCore é grande e acontece localmente; as imagens de banco que não
+têm `build:` são baixadas pelo Docker no host conforme necessário.
+
 ```bash
 # Via GHCR (recomendado)
 WOW_BACKEND_TAG=v1.2.3 ./wowctl update v1.2.3

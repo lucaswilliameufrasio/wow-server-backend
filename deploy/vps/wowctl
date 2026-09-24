@@ -67,7 +67,12 @@ ac_compose() {
   if [[ -f "$ACORE_ENV" ]]; then
     compose_args+=(--env-file "$ACORE_ENV")
   fi
-  docker compose "${compose_args[@]}" "$@"
+  if [[ "${WOWCTL_NO_BUILD:-false}" == true && "${1:-}" == up ]]; then
+    shift
+    docker compose "${compose_args[@]}" up --no-build "$@"
+  else
+    docker compose "${compose_args[@]}" "$@"
+  fi
 }
 
 be_compose() {
@@ -78,7 +83,12 @@ be_compose() {
   if [[ -f "$ENV_FILE" ]]; then
     compose_args+=(--env-file "$ENV_FILE")
   fi
-  docker compose "${compose_args[@]}" "$@"
+  if [[ "${WOWCTL_NO_BUILD:-false}" == true && "${1:-}" == up ]]; then
+    shift
+    docker compose "${compose_args[@]}" up --no-build "$@"
+  else
+    docker compose "${compose_args[@]}" "$@"
+  fi
 }
 
 # --- commands --------------------------------------------------------------
@@ -178,6 +188,7 @@ cmd_up() {
     [[ "$arg" == "--ac-only" ]] && ac_only=true
     [[ "$arg" == "--be-only" ]] && be_only=true
   done
+  local port="${WOW_API_PORT:-3000}"
 
   if ! $be_only; then
     info "Starting AzerothCore ..."
@@ -207,7 +218,6 @@ cmd_up() {
     info "Starting backend (PostgreSQL + API) ..."
     be_compose up -d
     info "Waiting for API health ..."
-    local port="${WOW_API_PORT:-3000}"
     for _ in $(seq 1 60); do
       if curl -sf "http://127.0.0.1:$port/health-check" >/dev/null 2>&1; then
         ok "API is healthy on port $port"
@@ -641,6 +651,62 @@ cmd_update() {
   info "To rollback: export WOW_BACKEND_TAG=<previous-tag> && ./wowctl update <previous-tag>"
 }
 
+# Deploy an image already transferred to this host (e.g. with `make deploy-to-server`).
+# Starts PostgreSQL on first deploy, updates the backend image reference, and
+# restores the previous reference if the replacement fails its health check.
+cmd_deploy_image() {
+  require_docker
+  local image="${1:-}" tag="${2:-}" web_image="${3:-${WOW_WEB_IMAGE:-ghcr.io/lucaswilliameufrasio/wow-server-backend-web}}" web_tag="${4:-$tag}"
+  [[ -n "$image" && -n "$tag" ]] || fail "Usage: ./wowctl deploy-image <image> <tag> [web-image] [web-tag]"
+  [[ -f "$ENV_FILE" ]] || fail "Missing $ENV_FILE; run ./wowctl install first"
+  load_env
+  docker image inspect "$image:$tag" >/dev/null 2>&1 || fail "Image not found locally: $image:$tag"
+
+  local old_image="${WOW_BACKEND_IMAGE:-ghcr.io/lucaswilliameufrasio/wow-server-backend}"
+  local old_tag="${WOW_BACKEND_TAG:-latest}"
+  local old_web_image="${WOW_WEB_IMAGE:-ghcr.io/lucaswilliameufrasio/wow-server-backend-web}"
+  local old_web_tag="${WOW_WEB_TAG:-latest}"
+  set_env_value() {
+    local key="$1" value="$2"
+    if grep -q "^${key}=" "$ENV_FILE"; then
+      sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    else
+      printf '\n%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+    fi
+  }
+  set_env_value WOW_BACKEND_IMAGE "$image"
+  set_env_value WOW_BACKEND_TAG "$tag"
+  set_env_value WOW_WEB_IMAGE "$web_image"
+  set_env_value WOW_WEB_TAG "$web_tag"
+
+  info "Starting app database and deploying $image:$tag ..."
+  if ! be_compose up -d --no-build; then
+    set_env_value WOW_BACKEND_IMAGE "$old_image"
+    set_env_value WOW_BACKEND_TAG "$old_tag"
+    set_env_value WOW_WEB_IMAGE "$old_web_image"
+    set_env_value WOW_WEB_TAG "$old_web_tag"
+    be_compose up -d --no-build || true
+    fail "Compose deploy failed; restored previous image reference $old_image:$old_tag"
+  fi
+
+  local port="${WOW_API_PORT:-3000}"
+  for _ in $(seq 1 60); do
+    if curl -sf "http://127.0.0.1:$port/health-check" >/dev/null 2>&1; then
+      ok "Backend $image:$tag is healthy on port $port"
+      return 0
+    fi
+    sleep 3
+  done
+
+  warn "New backend did not become healthy; restoring $old_image:$old_tag"
+  set_env_value WOW_BACKEND_IMAGE "$old_image"
+  set_env_value WOW_BACKEND_TAG "$old_tag"
+  set_env_value WOW_WEB_IMAGE "$old_web_image"
+  set_env_value WOW_WEB_TAG "$old_web_tag"
+  be_compose up -d --no-build || true
+  fail "Deploy health check failed; rollback attempted"
+}
+
 cmd_rollback() {
   require_docker; load_env
   local tag="${1:-previous}"
@@ -818,6 +884,7 @@ Backup & Restore:
 
 Updates:
   update [tag]          Update backend image and recreate
+  deploy-image <image> <tag>  Deploy an image already loaded on this host
   rollback [tag]        Rollback to previous tag
 
 Environment:
@@ -833,7 +900,7 @@ cmd="${1:-help}"
 shift 2>/dev/null || true
 
 case "$cmd" in
-  install|up|down|status|logs|set-realm|create-account|create-mcp-token|list-mcp-tokens|revoke-mcp-token|setup-game|reload|smoke-test|backup|restore|update|rollback|build|help)
+  install|up|down|status|logs|set-realm|create-account|create-mcp-token|list-mcp-tokens|revoke-mcp-token|setup-game|reload|smoke-test|backup|restore|update|deploy-image|rollback|build|help)
     fn="cmd_$(printf '%s' "$cmd" | tr - _)"
     "$fn" "$@"
     ;;

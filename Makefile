@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help dev test migrate-up migrate-down migration-create setup deps bootstrap seed seed-fast-raid-vendors seed-spec-bis-vendors jwt-keys app-postgres-up app-postgres-wait preflight-update backup-before-update weekend-go update-server update-azerothcore update-backend docker-build docker-publish docker-ship docker-run docker-compose-prod-up docker-compose-prod-down
+.PHONY: help dev test migrate-up migrate-down migration-create setup deps bootstrap seed seed-fast-raid-vendors seed-spec-bis-vendors jwt-keys app-postgres-up app-postgres-wait preflight-update backup-before-update weekend-go update-server update-azerothcore update-backend docker-build docker-publish docker-ship deploy-to-server docker-run docker-compose-prod-up docker-compose-prod-down
 
 AZEROTH_CORE_MYSQL_DATABASE_URL ?= mysql://root:password@127.0.0.1:3306
 APP_POSTGRES_DATABASE_URL ?= postgres://postgres:password@127.0.0.1:5432/wow_app
@@ -14,6 +14,11 @@ TARGET_PLATFORM ?= linux/amd64
 SSH_USER ?= root
 SSH_HOST ?= your-remote-host
 SSH_ALIAS ?=
+REMOTE_DIR ?= /opt/wow-backend/deploy/vps
+REMOTE_ACORE_DIR ?= /opt/azerothcore-wotlk
+IMAGE_NAME ?= wow-server-backend
+WEB_IMAGE_NAME ?= wow-server-backend-web
+ACORE_IMAGE_TAG ?=
 ENV ?= .env
 
 ifeq ($(SSH_ALIAS),)
@@ -43,6 +48,7 @@ help:
 	@echo "  make docker-build       - Build production image locally"
 	@echo "  make docker-publish     - Build and push image to registry"
 	@echo "  make docker-ship        - Build image and load to remote Docker via SSH"
+	@echo "  make deploy-to-server   - Build images locally, prepare host and deploy via SSH (SSH_ALIAS=... TAG=...)"
 	@echo "  make docker-run         - Run container locally with env file"
 	@echo "  make docker-compose-prod-up   - Start prod compose (app + postgres)"
 	@echo "  make docker-compose-prod-down - Stop prod compose"
@@ -172,6 +178,14 @@ docker-ship:
 		-t $(IMAGE_NAME):$(TAG) \
 		-f Dockerfile.production \
 		--output type=docker,dest=- . | ssh $(SSH_TARGET) "docker load"
+
+# Build on this machine, transfer only the finished image, then let wowctl
+# recreate and health-check the backend on the target host.
+deploy-to-server:
+	SSH_TARGET='$(SSH_TARGET)' REMOTE_DIR='$(REMOTE_DIR)' REMOTE_ACORE_DIR='$(REMOTE_ACORE_DIR)' \
+	IMAGE_NAME='$(IMAGE_NAME)' WEB_IMAGE_NAME='$(WEB_IMAGE_NAME)' TAG='$(TAG)' \
+	TARGET_PLATFORM='$(TARGET_PLATFORM)' ACORE_IMAGE_TAG='$(ACORE_IMAGE_TAG)' \
+	ACORE_REPO_DIR='$(ACORE_REPO_DIR)' ./scripts/deploy-to-server.sh
 
 docker-run:
 	@docker run --rm -p 3000:3000 \
